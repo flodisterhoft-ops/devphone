@@ -29,6 +29,8 @@ const state = {
   themeColor: null,
   currentUrl: 'about:blank',
   selftest: false,
+  inputMode: 'touch', // 'touch' | 'mouse' (v0.1.1) — re-applied on every emulation pass
+  viewportOverride: null, // {width,height} content viewport (v0.1.1) or null = device viewport
 };
 
 function send(channel, payload) {
@@ -84,18 +86,47 @@ function init(options) {
     return { ok: !!(res && res.ok), deviceId: device ? device.id : null, error: res && res.error };
   });
 
-  handle('device:set', async ({ deviceId }) => {
+  handle('device:set', async ({ deviceId, viewport }) => {
     const device = updater.findDevice(deviceId);
     if (!device) return { ok: false, error: 'unknown device: ' + deviceId };
     state.device = device;
+    // v0.1.1: optional content-viewport override — the renderer lays the page
+    // out BETWEEN the phone's bars and tells us the visible area. Stored in
+    // state so dom-ready re-applies honor it; CLEARED whenever a device:set
+    // arrives without one (backward compatible: old calls behave as before).
+    const vw = viewport ? Math.round(Number(viewport.width)) : 0;
+    const vh = viewport ? Math.round(Number(viewport.height)) : 0;
+    state.viewportOverride = vw > 0 && vh > 0 ? { width: vw, height: vh } : null;
     if (state.screenWC && !state.screenWC.isDestroyed()) {
       await emulation.applyDevice(state.screenWC, device, { standalone: state.standalone });
       await emulation.injectCfg(state.screenWC);
     }
     if (state.engineMode === 'webkit') {
-      await webkit.setDevice(device, { standalone: state.standalone, url: state.currentUrl });
+      await webkit.setDevice(device, {
+        standalone: state.standalone,
+        url: state.currentUrl,
+        viewport: state.viewportOverride,
+      });
     }
     return device; // contract: returns the device object
+  });
+
+  // v0.1.1: input mode — 'touch' (emulated touch, default) | 'mouse' (normal
+  // desktop mouse: text selection, drag-to-highlight, native cursor). UA and
+  // metrics stay phone-like either way. Persisted in state so every
+  // emulation re-apply (dom-ready, device:set) keeps the chosen mode.
+  handle('input:set', async ({ mode }) => {
+    if (mode !== 'touch' && mode !== 'mouse') {
+      return { ok: false, error: "unknown input mode: " + mode + " (use 'touch' or 'mouse')" };
+    }
+    if (state.engineMode === 'webkit') {
+      return webkit.setInputMode(mode); // {ok:false, error:'webkit mode: input mode fixed'}
+    }
+    state.inputMode = mode;
+    if (state.screenWC && !state.screenWC.isDestroyed()) {
+      await emulation.setInputMode(state.screenWC, mode);
+    }
+    return { ok: true, mode };
   });
 
   handle('engine:set', async ({ mode }) => {
@@ -111,6 +142,7 @@ function init(options) {
         device,
         url: state.currentUrl,
         standalone: state.standalone,
+        viewport: state.viewportOverride,
       });
       if (res && res.ok) {
         state.engineMode = 'webkit';
@@ -203,6 +235,15 @@ function init(options) {
       try { win.setResizable(false); } catch (e) {}
     }
     return { ok: true, width: w, height: h };
+  });
+
+  // v0.1.1: first-click fix — the renderer sends this on mousemove while the
+  // OS window is unfocused; focusing BEFORE the click lands means the
+  // activating click is no longer eaten. No moveTop/alwaysOnTop games.
+  handle('shell:activate', async () => {
+    const win = state.shellWindow;
+    if (win && !win.isDestroyed() && !win.isFocused()) win.focus();
+    return { ok: true };
   });
 
   handle('shell:minimize', async () => {

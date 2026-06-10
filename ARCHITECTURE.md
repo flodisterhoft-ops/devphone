@@ -287,3 +287,55 @@ ambient shadow under the phone (CSS drop-shadow on the body, since window
 is transparent), screen glass with a faint top-edge reflection, smooth
 60fps open/close animations for apps (scale+fade from icon), wiggle mode,
 believable iOS/One UI typography (system-ui stack). Colors per bodyStyle.
+
+## v0.1.1 extensions (ENGINE)
+
+New/extended IPC (renderer → main, invoke; all exposed on `window.devphone`):
+
+- `shell:activate` (no payload) → `{ok:true}` — first-click fix. The
+  renderer sends this on mousemove while the OS window is unfocused; main
+  calls `win.focus()` if `!win.isFocused()` (no moveTop / alwaysOnTop), so
+  the activating click is no longer eaten and "press twice" goes away.
+  Preload convenience: `devphone.shellActivate()`.
+
+- `input:set {mode}` → `{ok, mode}` — `mode: 'touch' | 'mouse'`.
+  - `touch` (default, previous behavior):
+    `Emulation.setTouchEmulationEnabled {enabled:true, maxTouchPoints:5}` +
+    `Emulation.setEmitTouchEventsForMouse {enabled:true, configuration:'mobile'}`.
+  - `mouse`: both disabled → normal desktop mouse (text selection,
+    drag-to-highlight, native cursor). UA/metrics/safe-areas unchanged —
+    the page still believes it is a phone.
+  The mode lives in main central state and is re-applied on every emulation
+  pass (dom-ready re-apply, `device:set`) — it no longer silently resets to
+  touch on navigation. WebKit engine: mode is fixed at context creation, the
+  call is accepted but declined: `{ok:false, error:'webkit mode: input mode
+  fixed'}`. Note: on iOS devices `navigator.maxTouchPoints` stays 5 in mouse
+  mode (ios-shims pins it — identity, not input pipeline).
+  Preload convenience: `devphone.inputSet(mode)`.
+
+- `device:set {deviceId, viewport?}` — extended. Optional
+  `viewport:{width,height}` = the CONTENT viewport in CSS px: the renderer
+  now lays the page out BETWEEN the phone's bars (status bar, browser
+  chrome, Android nav bar) and passes the visible area here. When present it
+  is used for `Emulation.setDeviceMetricsOverride` width/height; DPR, UA,
+  touch, safe-areas still come from the device, and screenWidth/Height stay
+  the device's FULL viewport (so `screen.width/height` report the real
+  phone). The override is stored in main state — dom-ready re-applies honor
+  it — and is CLEARED by any `device:set` without a viewport. Backward
+  compatible: old calls behave exactly as before. WebKit mode: the override
+  is also used for the Playwright context viewport.
+  Preload convenience: `devphone.deviceSet(deviceId, viewport?)`.
+
+Picker (`src/inject/picker.js`) — rewritten as a Chrome-DevTools-style
+inspector. Contract unchanged: `window.__DEVPHONE_PICKER__(on)` arm/disarm
+global, `__DEVPHONE_PICK__` console bridge, report fields identical,
+idempotent IIFE, engine-agnostic (same source evaluated in WebKit mode).
+New behavior while armed: normal ARROW cursor (`cursor:default !important`),
+hover overlay (pointer-events:none, max z-index) with the element box filled
+`rgba(111,168,220,.35)` + 1px `#1a73e8` outline, margin ring tinted
+`rgba(246,178,107,.25)`, and a dark rounded tooltip pill
+`` `tag#id.class` `` (mono) + `· W×H` that auto-flips below the element near
+the top edge. Tracking is rAF-throttled `elementFromPoint` with the overlay
+hidden during the probe. Click selects (capture phase, preventDefault +
+stopPropagation), emits the report, then disarms and removes overlay +
+cursor style. Escape disarms.

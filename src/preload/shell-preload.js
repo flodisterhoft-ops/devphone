@@ -24,6 +24,8 @@ const INVOKE_CHANNELS = [
   'updater:check',
   'devices:dismiss', // extension: hide an auto-discovered device
   'webkit:input',
+  'input:set', // v0.1.1: 'touch' | 'mouse'
+  'shell:activate', // v0.1.1: focus the OS window before a click lands
   'shell:resize',
   'shell:minimize',
   'shell:close',
@@ -66,7 +68,9 @@ const api = {
   // renderer → main conveniences
   devicesList: () => invoke('devices:list'),
   screenAttach: (webContentsId) => invoke('screen:attach', { webContentsId }),
-  deviceSet: (deviceId) => invoke('device:set', { deviceId }),
+  // v0.1.1: optional second arg {width,height} — content-viewport override
+  // (page laid out between the bars); omit it to restore the full viewport.
+  deviceSet: (deviceId, viewport) => invoke('device:set', { deviceId, viewport }),
   engineSet: (mode) => invoke('engine:set', { mode }),
   nav: (action, url) => invoke('nav', { action, url }),
   standaloneSet: (onFlag, themeColor) => invoke('standalone:set', { on: onFlag, themeColor }),
@@ -76,6 +80,8 @@ const api = {
   updaterCheck: () => invoke('updater:check'),
   devicesDismiss: (id) => invoke('devices:dismiss', { id }),
   webkitInput: (input) => invoke('webkit:input', input),
+  inputSet: (mode) => invoke('input:set', { mode }), // v0.1.1: 'touch' | 'mouse'
+  shellActivate: () => invoke('shell:activate'), // v0.1.1: first-click fix
   shellResize: (width, height) => invoke('shell:resize', { width, height }),
   shellMinimize: () => invoke('shell:minimize'),
   shellClose: () => invoke('shell:close'),

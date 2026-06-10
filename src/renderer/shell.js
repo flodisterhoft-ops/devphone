@@ -17,6 +17,8 @@
   var GAP = 12;          // gap between phone and rail
   var MIN_WIN_H = 600;   // rail needs at least this
   var SCALES = [0.75, 1, 1.25];
+  var NAV_H = 44;            // Android 3-button navigation bar height (CSS px @1:1)
+  var ANDROID_PWA_SB = 28;   // black status strip in Android standalone apps
 
   // bezel metrics per bodyStyle. Single source of truth — JS pushes these
   // into CSS custom properties so frames.css and window sizing never drift.
@@ -54,7 +56,11 @@
     pickerOn: false,
     attached: false,
     webviewReady: false,
-    newIds: {}             // deviceId -> true for freshly discovered phones
+    newIds: {},            // deviceId -> true for freshly discovered phones
+    nav3: false,           // Android 3-button navigation (per device id)
+    addrBar: 'top',        // Chrome address bar position (global)
+    inputMode: 'touch',    // 'touch' | 'mouse' (global)
+    contentViewport: null  // {width,height} of the honest content area (unscaled)
   };
 
   /* ---------- tiny pub/sub ------------------------------------------------ */
@@ -127,12 +133,14 @@
   var el = {};
   function cacheEls() {
     ['stage', 'phone-wrap', 'phone', 'screen', 'page', 'webkit-canvas', 'homescreen',
-     'startpage', 'browser-chrome', 'sheet-layer', 'statusbar', 'cutout',
+     'startpage', 'browser-chrome', 'navbar', 'sheet-layer', 'statusbar', 'cutout',
      'home-indicator', 'home-gesture', 'open-anim-layer', 'glass', 'toasts',
-     'sidebar-controls', 'device-popover', 'device-label', 'engine-label', 'scale-label',
+     'sidebar-controls', 'device-popover', 'settings-popover',
+     'device-label', 'engine-label', 'scale-label', 'input-label',
      'hw-home-button',
-     'btn-min', 'btn-close', 'btn-device', 'btn-engine', 'btn-scale', 'btn-picker',
-     'btn-shot-screen', 'btn-shot-device', 'btn-rotate', 'btn-home', 'btn-updater'
+     'btn-min', 'btn-close', 'btn-device', 'btn-engine', 'btn-input', 'btn-scale',
+     'btn-picker', 'btn-shot-screen', 'btn-shot-device', 'btn-rotate', 'btn-home',
+     'btn-settings'
     ].forEach(function (id) {
       el[camelName(id.replace(/-/g, ':'))] = document.getElementById(id);
     });
@@ -154,8 +162,8 @@
     while (el.toasts.children.length > 4) el.toasts.removeChild(el.toasts.firstChild);
     requestAnimationFrame(function () { t.classList.add('show'); });
     setTimeout(function () {
-      t.classList.remove('show');
-      setTimeout(function () { t.remove(); }, 350);
+      t.classList.add('hide');
+      setTimeout(function () { t.remove(); }, 200);
     }, ms || 3600);
   }
 
@@ -258,8 +266,11 @@
   // black or white status text from the active page's theme-color
   function applyStatusTheme() {
     var darkText;
+    var d = state.device;
     if (!state.app) {
       darkText = false;                       // wallpapers are dark → white text
+    } else if (state.standalone && d && d.os === 'android') {
+      darkText = false;                       // solid black status strip → white text
     } else {
       var lum = luminance(state.themeColor);
       darkText = (lum == null) ? true : lum > 150;
@@ -297,8 +308,203 @@
     invoke('shell:resize', { width: w, height: h });
   }
 
+  /* ---------- honest content-area layout + viewport overrides --------------
+     The webview occupies the CONTENT AREA between bars (status bar, browser
+     chrome, 3-button navbar). Every layout change re-sends the visible size
+     via device:set {viewport} so window.innerHeight in the page is honest.
+     All values are UNSCALED CSS px, rounded to integers.                     */
+
+  function nav3On() {
+    var d = state.device;
+    return !!(d && d.os === 'android' && state.nav3);
+  }
+
+  function contentInsets() {
+    var d = state.device;
+    if (!d) return { top: 0, bottom: 0 };
+    var navH = nav3On() ? NAV_H : 0;
+    if (!state.app) return { top: 0, bottom: 0 };            // home — no page
+    if (state.app.type === 'pwa') {
+      if (d.os === 'ios') return { top: 0, bottom: 0 };      // edge-to-edge
+      return { top: ANDROID_PWA_SB, bottom: navH };          // black strip + navbar
+    }
+    // browser mode — the chrome module knows its own bars (incl. status bar
+    // for android-style top bars; Safari pages draw under the status bar)
+    var ch = (DP.chrome && DP.chrome.getInsets) ? DP.chrome.getInsets() : { top: 0, bottom: 0 };
+    return { top: ch.top, bottom: ch.bottom + navH };
+  }
+
+  var vpTimer = null;
+  var lastVp = '';
+
+  function sendViewport() {
+    var d = state.device;
+    if (!d || !state.attached) return;
+    var ins = contentInsets();
+    var w = Math.round(d.viewport.width);
+    var h = Math.round(d.viewport.height - ins.top - ins.bottom);
+    state.contentViewport = { width: w, height: h };
+    var key = d.id + ':' + w + 'x' + h;
+    if (key === lastVp) return;
+    lastVp = key;
+    invoke('device:set', { deviceId: d.id, viewport: { width: w, height: h } })
+      .then(function () {
+        // input mode must survive every re-emulation
+        invoke('input:set', { mode: state.inputMode });
+      });
+  }
+
+  function scheduleViewport(immediate) {
+    if (vpTimer) { clearTimeout(vpTimer); vpTimer = null; }
+    if (immediate) { sendViewport(); return; }
+    vpTimer = setTimeout(function () { vpTimer = null; sendViewport(); }, 250);
+  }
+
+  function layoutContent(opts) {
+    var d = state.device;
+    if (!d || !el.screen) return;
+    var ins = contentInsets();
+    var st = el.screen.style;
+    st.setProperty('--content-top', Math.round(ins.top) + 'px');
+    st.setProperty('--content-h', Math.round(d.viewport.height - ins.top - ins.bottom) + 'px');
+    st.setProperty('--nav-h', (nav3On() ? NAV_H : 0) + 'px');
+    state.contentViewport = {
+      width: Math.round(d.viewport.width),
+      height: Math.round(d.viewport.height - ins.top - ins.bottom)
+    };
+    if (el.navbar) el.navbar.hidden = !nav3On();
+    document.body.classList.toggle('android-standalone',
+      !!(state.standalone && d.os === 'android'));
+    applyStatusTheme();
+    scheduleViewport(opts && opts.immediate);
+  }
+
+  /* ---------- Android 3-button navigation bar ------------------------------- */
+
+  function renderNavbar() {
+    if (!el.navbar) return;
+    el.navbar.innerHTML =
+      '<button id="nb-recents" title="Recents">' +
+        '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 2.5v13M9 2.5v13M15 2.5v13"/></svg>' +
+      '</button>' +
+      '<button id="nb-home" title="Home">' +
+        '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="6.4"/></svg>' +
+      '</button>' +
+      '<button id="nb-back" title="Back">' +
+        '<svg width="17" height="17" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 2.5 5 9l6.5 6.5"/></svg>' +
+      '</button>';
+    var rec = el.navbar.querySelector('#nb-recents');
+    var home = el.navbar.querySelector('#nb-home');
+    var back = el.navbar.querySelector('#nb-back');
+    if (rec) rec.addEventListener('click', recentsFlourish);
+    if (home) home.addEventListener('click', function () { goHome(); });
+    if (back) back.addEventListener('click', navbarBack);
+  }
+
+  function navbarBack() {
+    if (state.app && state.canGoBack) { navAction('back'); return; }
+    if (state.app) goHome();   // standalone (or empty history) → exit to home
+  }
+
+  function recentsFlourish() {
+    if (!el.screen) return;
+    el.screen.classList.add('recents-anim');
+    setTimeout(function () { el.screen.classList.remove('recents-anim'); }, 240);
+  }
+
+  /* ---------- per-device / global settings ----------------------------------- */
+
+  function loadDeviceSettings(device) {
+    var v = null;
+    try { v = localStorage.getItem('devphone.nav3.' + device.id); } catch (e) {}
+    state.nav3 = v === '1';
+  }
+
+  function setNav3(on) {
+    state.nav3 = !!on;
+    try {
+      if (state.device) localStorage.setItem('devphone.nav3.' + state.device.id, on ? '1' : '0');
+    } catch (e) {}
+    renderSettingsPopover();
+    updateHomeIndicator();
+    layoutContent();
+  }
+
+  function setAddrBar(pos) {
+    pos = pos === 'bottom' ? 'bottom' : 'top';
+    if (state.addrBar === pos) { renderSettingsPopover(); return; }
+    state.addrBar = pos;
+    try { localStorage.setItem('devphone.addrbar', pos); } catch (e) {}
+    renderSettingsPopover();
+    bus.emit('settings-changed', { addrBar: pos });  // chrome bar re-renders itself
+    layoutContent();
+  }
+
+  function setInputMode(mode, fromUser) {
+    state.inputMode = mode === 'mouse' ? 'mouse' : 'touch';
+    try { localStorage.setItem('devphone.inputmode', state.inputMode); } catch (e) {}
+    updateInputBtn();
+    invoke('input:set', { mode: state.inputMode });
+    if (fromUser) {
+      toast(state.inputMode === 'mouse'
+        ? '🖱️ Mouse — precise cursor & selection'
+        : '👆 Touch — swipe & scroll like a finger', 1800);
+    }
+  }
+
+  function updateInputBtn() {
+    if (!el.btnInput) return;
+    var mouse = state.inputMode === 'mouse';
+    el.btnInput.firstChild.textContent = mouse ? '🖱️' : '👆';
+    if (el.inputLabel) el.inputLabel.textContent = mouse ? 'Mouse' : 'Touch';
+    el.btnInput.title = mouse
+      ? 'Input: Mouse — precise cursor + text selection. Click for Touch.'
+      : 'Input: Touch — swipes & flick-scroll like a finger. Click for Mouse.';
+  }
+
+  /* ---------- settings popover ------------------------------------------------ */
+
+  function renderSettingsPopover() {
+    var pop = el.settingsPopover;
+    if (!pop) return;
+    var d = state.device || {};
+    var html = '<div class="set-title">Settings</div>' +
+      '<div class="set-sec">Navigation · ' + esc(d.label || 'device') + '</div>';
+    if (d.os === 'android') {
+      html += '<div class="set-seg" data-set="nav">' +
+        '<button data-v="gestures" class="' + (!state.nav3 ? 'on' : '') + '">Gestures</button>' +
+        '<button data-v="3btn" class="' + (state.nav3 ? 'on' : '') + '">3 buttons</button>' +
+      '</div>';
+    } else {
+      html += '<div class="set-note">iPhones always use gesture navigation</div>';
+    }
+    html += '<div class="set-sec">Address bar · Chrome</div>' +
+      '<div class="set-seg" data-set="addr">' +
+        '<button data-v="top" class="' + (state.addrBar !== 'bottom' ? 'on' : '') + '">Top</button>' +
+        '<button data-v="bottom" class="' + (state.addrBar === 'bottom' ? 'on' : '') + '">Bottom</button>' +
+      '</div>';
+    pop.innerHTML = html;
+  }
+
+  function toggleSettingsPopover(show) {
+    var pop = el.settingsPopover;
+    if (!pop) return;
+    var willShow = (show != null) ? show : pop.hidden;
+    pop.hidden = !willShow;
+    if (willShow) {
+      renderSettingsPopover();
+      toggleDevicePopover(false);
+    }
+  }
+
   function applyDevice(device) {
     state.device = device;
+    loadDeviceSettings(device);
+    // suppress the content-area resize animation during a device swap
+    if (el.screen) {
+      el.screen.classList.add('no-anim');
+      setTimeout(function () { el.screen.classList.remove('no-anim'); }, 80);
+    }
     var m = metricsFor(device);
     var ph = el.phone;
     ph.className = 'body-' + device.bodyStyle + ' brand-' + device.brand + ' os-' + device.os;
@@ -320,6 +526,8 @@
     if (DP.home) DP.home.render();
     updateHomeIndicator();
     applyStatusTheme();
+    renderSettingsPopover();
+    layoutContent();
     bus.emit('device-changed', device);
   }
 
@@ -329,7 +537,7 @@
     if (!device || (state.device && state.device.id === id)) return;
     goHome(true);
     applyDevice(device);
-    if (state.attached) invoke('device:set', { deviceId: device.id });
+    if (state.attached) { lastVp = ''; scheduleViewport(true); }
     delete state.newIds[id];
     renderDevicePopover();
     toast('📱 ' + device.label + ' — ' + device.viewport.width + '×' + device.viewport.height + ' @' + device.dpr + 'x');
@@ -339,7 +547,8 @@
 
   function updateHomeIndicator() {
     var d = state.device;
-    var gesturePhone = d && d.cutout !== 'none';
+    // 3-button phones have no gesture pill / swipe area
+    var gesturePhone = d && d.cutout !== 'none' && !nav3On();
     if (el.homeIndicator) el.homeIndicator.hidden = !gesturePhone;
     if (el.homeGesture) el.homeGesture.hidden = !(gesturePhone && state.app);
   }
@@ -355,6 +564,7 @@
     if (DP.home) DP.home.show();
     applyStatusTheme();
     updateHomeIndicator();
+    layoutContent();
     if (!silent) bus.emit('went-home');
   }
 
@@ -386,7 +596,8 @@
         try { id = wv.getWebContentsId(); } catch (e) { console.warn('[DevPhone] getWebContentsId failed', e); }
         if (id != null) {
           invoke('screen:attach', { webContentsId: id }).then(function () {
-            if (state.device) invoke('device:set', { deviceId: state.device.id });
+            lastVp = '';                 // force a fresh viewport push
+            scheduleViewport(true);      // device:set {deviceId, viewport} + input mode
             bus.emit('attached');
           });
         } else {
@@ -510,11 +721,13 @@
       else { drawing = true; img.src = u; }
     });
 
-    // -- input forwarding (coordinates in viewport CSS px = screen px / scale)
+    // -- input forwarding (coordinates in CONTENT viewport CSS px — the
+    //    engine's emulated viewport matches the honest content area)
     function vpPoint(ev) {
       var r = c.getBoundingClientRect();
-      var vw = state.device ? state.device.viewport.width : r.width;
-      var vh = state.device ? state.device.viewport.height : r.height;
+      var cv = state.contentViewport || (state.device && state.device.viewport) || null;
+      var vw = cv ? cv.width : r.width;
+      var vh = cv ? cv.height : r.height;
       return {
         x: Math.max(0, Math.min(vw, (ev.clientX - r.left) * vw / r.width)),
         y: Math.max(0, Math.min(vh, (ev.clientY - r.top) * vh / r.height))
@@ -574,17 +787,17 @@
   function setEngine(mode) {
     if (mode === state.engine) return Promise.resolve();
     if (mode === 'webkit') {
-      toast('🧭 Starting WebKit (Playwright)…');
+      toast('🧭 Starting WebKit…');
       return invoke('engine:set', { mode: 'webkit' }).then(function (res) {
         if (!res || res.ok === false) {
-          toast('⚠️ WebKit unavailable' + (res && res.error ? ' — ' + res.error : ' — staying on Chromium'));
+          toast('⚠️ WebKit unavailable' + (res && res.error ? ' — ' + res.error : ''));
           updateEngineBtn();
           return;
         }
         state.engine = 'webkit';
         document.body.classList.add('engine-webkit');
         updateEngineBtn();
-        toast('🧭 WebKit engine active — true Safari rendering');
+        toast('🧭 WebKit active', 2200);
       });
     }
     return invoke('engine:set', { mode: 'chromium' }).then(function () {
@@ -592,7 +805,7 @@
       document.body.classList.remove('engine-webkit');
       updateEngineBtn();
       updateNavState();
-      toast('⚡ Chromium engine active');
+      toast('⚡ Chromium active', 2200);
     });
   }
 
@@ -610,14 +823,15 @@
     var on = (force != null) ? !!force : !state.pickerOn;
     state.pickerOn = on;
     if (el.btnPicker) el.btnPicker.classList.toggle('active', on);
+    document.body.classList.toggle('picker-on', on);   // shell cursor = arrow
     invoke('picker:toggle', { on: on });
-    if (on) toast('🎯 Picker armed — tap an element on the page');
+    if (on) toast('🎯 Tap an element on the page', 2200);
   }
 
   function takeShot(mode) {
     invoke('shot', { mode: mode }).then(function (res) {
-      if (res && res.path) toast('📸 Saved → ' + res.path + ' (also on clipboard)');
-      else toast('⚠️ Screenshot failed — engine not ready?');
+      if (res && res.path) toast('📸 Saved to Pictures · copied', 2200);
+      else toast('⚠️ Screenshot failed');
     });
   }
 
@@ -629,7 +843,7 @@
       if (!exists) state.devices.push(d);
       state.newIds[d.id] = true;
       added++;
-      toast('📱 ' + (d.label || d.id) + ' detected — added with estimated specs', 5000);
+      toast('📱 ' + (d.label || d.id) + ' added (estimated)', 3500);
     });
     if (added) renderDevicePopover();
     return added;
@@ -637,20 +851,91 @@
 
   /* ---------- device popover ------------------------------------------------ */
 
+  // mini phone illustration (~22×38): body in the device accentColor, the
+  // right cutout hint, Samsung wallpaper-gradient screen vs dark iPhone glass
+  function miniPhoneSvg(d) {
+    var samsung = d.brand === 'samsung' || d.os === 'android';
+    var gid = 'mp-' + String(d.id || '').replace(/[^a-z0-9]/gi, '');
+    var none = d.cutout === 'none';
+    var scrY = none ? 5.5 : 3;
+    var scrH = none ? 27 : 32;
+    var rx = Math.max(1.5, Math.min(5, (d.cornerRadius || 0) / 14));
+    var stops = samsung
+      ? '<stop offset="0" stop-color="#3a7bd5"/><stop offset=".55" stop-color="#7b4ddb"/><stop offset="1" stop-color="#c0467f"/>'
+      : '<stop offset="0" stop-color="#2a3354"/><stop offset="1" stop-color="#0b0e1c"/>';
+    var cut = '';
+    if (d.cutout === 'dynamic-island') {
+      cut = '<rect x="8" y="5" width="6" height="1.9" rx=".95" fill="#000"/>';
+    } else if (d.cutout === 'punch-hole') {
+      cut = '<circle cx="11" cy="5.6" r="1" fill="#000"/>';
+    } else if (d.cutout === 'notch') {
+      cut = '<rect x="7.5" y="3" width="7" height="2.2" rx="1.1" fill="#000"/>';
+    } else {
+      cut = '<circle cx="11" cy="35" r="1.3" fill="none" stroke="rgba(255,255,255,.4)" stroke-width=".7"/>';
+    }
+    return '<svg class="dev-mini" width="22" height="38" viewBox="0 0 22 38" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1">' + stops + '</linearGradient></defs>' +
+      '<rect x=".75" y=".75" width="20.5" height="36.5" rx="' + (rx + 2) + '" fill="' + esc(d.accentColor || '#2c2c2e') + '" stroke="rgba(255,255,255,.28)" stroke-width=".8"/>' +
+      '<rect x="2.5" y="' + scrY + '" width="17" height="' + scrH + '" rx="' + rx + '" fill="url(#' + gid + ')"' +
+        (samsung ? ' opacity=".85"' : '') + '/>' +
+      cut +
+      '</svg>';
+  }
+
+  // pinned "check for new phones" row state
+  var checkState = { phase: 'idle', msg: '' };
+
+  function checkRowHtml() {
+    if (checkState.phase === 'busy') {
+      return '<span class="dc-ico spin">🔄</span><span class="dc-txt">Checking…</span>';
+    }
+    if (checkState.phase === 'done') {
+      return '<span class="dc-ico">📡</span><span class="dc-txt">' + esc(checkState.msg) + '</span>';
+    }
+    return '<span class="dc-ico">🔄</span><span class="dc-txt">Check for new phones</span>';
+  }
+
+  function runUpdaterCheck() {
+    if (checkState.phase === 'busy') return;
+    checkState = { phase: 'busy', msg: '' };
+    renderDevicePopover();
+    invoke('updater:check').then(function (res) {
+      var n = (res && res.added) ? res.added.length : 0;
+      if (n) addDiscoveredDevices(res.added);
+      var msg;
+      if (!res) msg = 'Check failed — engine offline?';
+      else if (n) msg = '+' + n + ' new phone' + (n > 1 ? 's' : '');
+      else msg = 'Up to date';
+      checkState = { phase: 'done', msg: msg };
+      renderDevicePopover();
+      setTimeout(function () {
+        checkState = { phase: 'idle', msg: '' };
+        if (el.devicePopover && !el.devicePopover.hidden) renderDevicePopover();
+      }, 2600);
+    });
+  }
+
   function renderDevicePopover() {
     var pop = el.devicePopover;
     if (!pop) return;
-    pop.innerHTML = state.devices.map(function (d) {
+    var rows = state.devices.map(function (d) {
       var cur = state.device && d.id === state.device.id;
       var badges = (state.newIds[d.id] ? '<em class="new-badge">NEW</em>' : '') +
                    (d.estimated ? '<em class="est-badge">est.</em>' : '');
       return '<button class="dev-row' + (cur ? ' current' : '') + '" data-id="' + esc(d.id) + '">' +
-               '<span class="dev-name">' + esc(d.label) + badges + '</span>' +
-               '<span class="dev-sub">' + d.viewport.width + '×' + d.viewport.height +
-                 ' @' + d.dpr + 'x · ' + (d.os === 'ios' ? 'iOS' : 'Android') + ' ' + esc(d.osVersion || '') +
+               miniPhoneSvg(d) +
+               '<span class="dev-col">' +
+                 '<span class="dev-name">' + esc(d.label) + badges + '</span>' +
+                 '<span class="dev-sub">' + d.viewport.width + '×' + d.viewport.height +
+                   ' @' + d.dpr + 'x · ' + (d.os === 'ios' ? 'iOS' : 'Android') + ' ' + esc(d.osVersion || '') +
+                 '</span>' +
                '</span>' +
              '</button>';
     }).join('');
+    pop.innerHTML =
+      '<button class="dev-check" id="dev-check-row"' +
+        (checkState.phase === 'busy' ? ' disabled' : '') + '>' + checkRowHtml() + '</button>' +
+      rows;
   }
 
   function toggleDevicePopover(show) {
@@ -658,7 +943,10 @@
     if (!pop) return;
     var willShow = (show != null) ? show : pop.hidden;
     pop.hidden = !willShow;
-    if (willShow) renderDevicePopover();
+    if (willShow) {
+      renderDevicePopover();
+      if (el.settingsPopover) el.settingsPopover.hidden = true;
+    }
   }
 
   /* ---------- control rail --------------------------------------------------- */
@@ -671,26 +959,53 @@
     if (el.btnMin) el.btnMin.addEventListener('click', function () { invoke('shell:minimize'); });
     if (el.btnClose) el.btnClose.addEventListener('click', function () { invoke('shell:close'); });
 
-    if (el.btnDevice) el.btnDevice.addEventListener('click', function (e) {
+    // popover toggles react on MOUSEDOWN so the first press opens them even
+    // when focus was elsewhere (no more "press twice")
+    if (el.btnDevice) el.btnDevice.addEventListener('mousedown', function (e) {
       e.stopPropagation();
       toggleDevicePopover();
     });
+    if (el.btnSettings) el.btnSettings.addEventListener('mousedown', function (e) {
+      e.stopPropagation();
+      toggleSettingsPopover();
+    });
+
     if (el.devicePopover) el.devicePopover.addEventListener('click', function (e) {
+      if (e.target.closest('#dev-check-row')) { runUpdaterCheck(); return; }
       var row = e.target.closest('.dev-row');
       if (!row) return;
       toggleDevicePopover(false);
       switchDevice(row.getAttribute('data-id'));
     });
-    document.addEventListener('click', function (e) {
+
+    if (el.settingsPopover) el.settingsPopover.addEventListener('click', function (e) {
+      var btn = e.target.closest('.set-seg button');
+      if (!btn) return;
+      var seg = btn.parentElement.getAttribute('data-set');
+      if (seg === 'nav') setNav3(btn.getAttribute('data-v') === '3btn');
+      else if (seg === 'addr') setAddrBar(btn.getAttribute('data-v'));
+    });
+
+    // close popovers on the FIRST press anywhere else (mousedown, not click)
+    document.addEventListener('mousedown', function (e) {
       if (el.devicePopover && !el.devicePopover.hidden &&
-          !el.devicePopover.contains(e.target) && e.target !== el.btnDevice &&
-          !el.btnDevice.contains(e.target)) {
+          !el.devicePopover.contains(e.target) &&
+          !(el.btnDevice && el.btnDevice.contains(e.target))) {
         toggleDevicePopover(false);
+      }
+      if (el.settingsPopover && !el.settingsPopover.hidden &&
+          !el.settingsPopover.contains(e.target) &&
+          !(el.btnSettings && el.btnSettings.contains(e.target))) {
+        toggleSettingsPopover(false);
       }
     });
 
     if (el.btnEngine) el.btnEngine.addEventListener('click', function () {
       setEngine(state.engine === 'webkit' ? 'chromium' : 'webkit');
+    });
+
+    if (el.btnInput) el.btnInput.addEventListener('click', function () {
+      setInputMode(state.inputMode === 'mouse' ? 'touch' : 'mouse', true);
     });
 
     if (el.btnScale) el.btnScale.addEventListener('click', function () {
@@ -711,15 +1026,6 @@
     // parameter — so rotation is hidden until the engine supports it.
     if (el.btnRotate) el.btnRotate.style.display = 'none';
 
-    if (el.btnUpdater) el.btnUpdater.addEventListener('click', function () {
-      toast('📡 Checking for new phones…');
-      invoke('updater:check').then(function (res) {
-        if (res && res.added && res.added.length) addDiscoveredDevices(res.added);
-        else if (res && res.checked) toast('✓ Device list is up to date');
-        else toast('⚠️ Check failed — engine not ready or offline');
-      });
-    });
-
     window.addEventListener('keydown', function (e) {
       if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault(); togglePicker();
@@ -732,12 +1038,11 @@
   /* ---------- main → renderer events ----------------------------------------- */
 
   function wireEngineEvents() {
-    listen('picker:result', function (payload) {
-      var report = (payload && payload.report) ? payload.report : payload;
+    listen('picker:result', function () {
       state.pickerOn = false;
       if (el.btnPicker) el.btnPicker.classList.remove('active');
-      var what = report && report.selector ? ' — ' + report.selector : '';
-      toast('📋 Copied for Claude' + what, 4500);
+      document.body.classList.remove('picker-on');
+      toast('Copied to clipboard', 1200);
     });
 
     listen('devices:new', function (payload) {
@@ -764,6 +1069,65 @@
     });
   }
 
+  /* ---------- focus fixes ("press twice" killers) ------------------------------ */
+
+  function wireFocusFixes() {
+    // 1a) focus-follows-mouse: by the time the user clicks, the OS window is
+    //     active, so the first click lands.
+    var lastMove = 0;
+    function activateIfNeeded() {
+      if (!document.hasFocus()) invoke('shell:activate');
+    }
+    window.addEventListener('mousemove', function () {
+      var now = Date.now();
+      if (now - lastMove < 150) return;
+      lastMove = now;
+      activateIfNeeded();
+    }, { passive: true });
+
+    // 1b) guest/shell focus juggling
+    function focusGuest() {
+      var ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return; // don't steal from shell inputs
+      if (!state.webviewReady || !state.app || state.engine !== 'chromium') return;
+      var wv = el.page;
+      if (wv && typeof wv.focus === 'function') {
+        try { wv.focus(); } catch (e) {}
+      }
+    }
+    function blurGuest() {
+      var ae = document.activeElement;
+      if (ae && ae === el.page && typeof ae.blur === 'function') {
+        try { ae.blur(); } catch (e) {}
+      }
+    }
+    // entering the screen / webview area → page owns the keyboard
+    if (el.screen) el.screen.addEventListener('mouseenter', function () { activateIfNeeded(); focusGuest(); });
+    if (el.page && typeof el.page.addEventListener === 'function') {
+      el.page.addEventListener('mouseenter', function () { activateIfNeeded(); focusGuest(); });
+    }
+    // entering shell chrome / popovers / bars → shell owns the first click.
+    // (mouseover bubbles, so this also works for #browser-chrome, whose root
+    // is pointer-events:none with interactive children)
+    [el.sidebarControls, el.devicePopover, el.settingsPopover, el.browserChrome,
+     el.sheetLayer, el.navbar, el.homescreen].forEach(function (n) {
+      if (!n) return;
+      n.addEventListener('mouseover', function () { activateIfNeeded(); blurGuest(); });
+    });
+
+    // 1c) shell text inputs select-all on focus (and survive the mouseup that
+    //     would normally collapse the selection)
+    document.addEventListener('focusin', function (e) {
+      var t = e.target;
+      if (!t || t.tagName !== 'INPUT') return;
+      var ty = (t.getAttribute('type') || 'text').toLowerCase();
+      if (ty !== 'text' && ty !== 'search' && ty !== 'url') return;
+      try { t.select(); } catch (err) {}
+      var keepSel = function (ev) { ev.preventDefault(); t.removeEventListener('mouseup', keepSel); };
+      t.addEventListener('mouseup', keepSel);
+    });
+  }
+
   /* ---------- boot ------------------------------------------------------------ */
 
   function init() {
@@ -773,7 +1137,14 @@
     wireCanvas();
     wireGesture();
     wireEngineEvents();
+    wireFocusFixes();
+    renderNavbar();
     startClock();
+
+    // global settings (loaded before the first applyDevice)
+    try { state.addrBar = localStorage.getItem('devphone.addrbar') === 'bottom' ? 'bottom' : 'top'; } catch (e) {}
+    try { state.inputMode = localStorage.getItem('devphone.inputmode') === 'mouse' ? 'mouse' : 'touch'; } catch (e) {}
+    updateInputBtn();
 
     invoke('devices:list').then(function (res) {
       var devices = res && res.devices;
@@ -844,6 +1215,14 @@
     goHome: goHome,
     applyStatusTheme: applyStatusTheme,
     updateHomeIndicator: updateHomeIndicator,
+    layoutContent: layoutContent,
+    sbHeight: sbHeight,
+    settings: {
+      getAddrBar: function () { return state.addrBar; },
+      setAddrBar: setAddrBar,
+      setNav3: setNav3,
+      nav3On: nav3On
+    },
     getWebview: function () { return el.page; }
     // DP.home / DP.chrome are attached by homescreen.js / browser-chrome.js
   };

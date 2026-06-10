@@ -17,6 +17,44 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  /* ---------- bar metrics (CSS px @1:1, must match the CSS below) ------------ */
+  // Safari bottom bar: 8 pad + 46 pill + 9 gap + 36 tools + 26 pad = 125
+  //          collapsed: 3 pad + 21 pill + 7 pad                    = 31
+  // Chrome top bar (below status bar): 6 pad + 40 field + 9 pad    = 55
+  // Chrome bottom omnibox:             8 pad + 40 field + 8 pad    = 56
+  // Samsung top (below status bar):    6 pad + 38 field + 8 pad    = 52
+  // Samsung bottom toolbar:                                          54
+  var SAF_BAR = 125, SAF_BAR_COLLAPSED = 31;
+  var CHR_TOP = 55, CHR_BOTTOM = 56;
+  var SAM_TOP = 52, SAM_BOTTOM = 54;
+
+  function addrBarBottom() {
+    return !!(DP.settings && typeof DP.settings.getAddrBar === 'function' &&
+              DP.settings.getAddrBar() === 'bottom');
+  }
+
+  function relayout() {
+    if (typeof DP.layoutContent === 'function') DP.layoutContent();
+  }
+
+  // honest content-area insets contributed by the current browser chrome.
+  // Status bar is included for Android-style top bars (their white bar paints
+  // the status area); Safari keeps top:0 — iOS pages draw under the status bar.
+  function getInsets() {
+    if (!current || current.type !== 'browser') return { top: 0, bottom: 0 };
+    var d = DP.state.device || {};
+    var sb = (typeof DP.sbHeight === 'function') ? DP.sbHeight(d) : 0;
+    if (current.browser === 'safari') {
+      return { top: 0, bottom: collapsed ? SAF_BAR_COLLAPSED : SAF_BAR };
+    }
+    if (current.browser === 'samsung') {
+      return { top: sb + SAM_TOP, bottom: SAM_BOTTOM };
+    }
+    // chrome
+    if (addrBarBottom()) return { top: sb, bottom: CHR_BOTTOM };
+    return { top: sb + CHR_TOP, bottom: 0 };
+  }
+
   /* ---------- small SVG glyphs ---------------------------------------------- */
 
   function svgChevron(dir) {
@@ -125,7 +163,7 @@
     $('saf-back').addEventListener('click', function () { DP.navAction('back'); });
     $('saf-fwd').addEventListener('click', function () { DP.navAction('forward'); });
     $('saf-share').addEventListener('click', openShareSheet);
-    $('saf-tabs').addEventListener('click', function () { DP.toast('🗂️ One tab is plenty — tabs are decorative'); });
+    $('saf-tabs').addEventListener('click', function () { DP.toast('🗂️ Tabs are decorative'); });
     $('saf-pill').addEventListener('click', function () {
       if (collapsed) { setCollapsed(false); return; }
       editUrlInline($('saf-pill'), 'pill-edit');
@@ -133,8 +171,10 @@
   }
 
   function renderChromeAndroid() {
+    var bottom = addrBarBottom();
     chromeRoot().innerHTML =
-      '<div class="bc bc-chrome">' +
+      '<div class="bc bc-chrome' + (bottom ? ' addr-bottom' : '') + '">' +
+        (bottom ? '<div class="chr-statusfill"></div>' : '') +
         '<div class="chr-bar">' +
           '<div class="chr-field" id="chr-field">' +
             svgLock(12) +
@@ -153,14 +193,17 @@
           '</div>' +
           '<button class="menu-item" id="chr-newtab">New tab</button>' +
           '<button class="menu-item" id="chr-a2hs">Add to Home screen</button>' +
+          '<button class="menu-item" id="chr-addrbar">' +
+            (bottom ? 'Move address bar to top' : 'Move address bar to bottom') + '</button>' +
           '<button class="menu-item" id="chr-copy">Copy link</button>' +
         '</div>' +
       '</div>';
 
     $('chr-reload').addEventListener('click', function (e) { e.stopPropagation(); DP.navAction('reload'); });
     $('chr-field').addEventListener('click', function () { editUrlInline($('chr-field'), 'pill-edit'); });
-    $('chr-tabs').addEventListener('click', function () { DP.toast('🗂️ Tabs are decorative in DevPhone'); });
-    $('chr-menu').addEventListener('click', function (e) {
+    $('chr-tabs').addEventListener('click', function () { DP.toast('🗂️ Tabs are decorative'); });
+    // menu opens on MOUSEDOWN so the first press lands even mid focus-juggle
+    $('chr-menu').addEventListener('mousedown', function (e) {
       e.stopPropagation();
       $('chr-menu-pop').hidden = !$('chr-menu-pop').hidden;
     });
@@ -173,6 +216,12 @@
     });
     $('chr-newtab').addEventListener('click', function () { hideMenus(); showStart('chrome'); });
     $('chr-a2hs').addEventListener('click', function () { hideMenus(); beginAddToHome('chrome'); });
+    $('chr-addrbar').addEventListener('click', function () {
+      hideMenus();
+      if (DP.settings && DP.settings.setAddrBar) {
+        DP.settings.setAddrBar(bottom ? 'top' : 'bottom'); // re-render via settings-changed
+      }
+    });
     $('chr-copy').addEventListener('click', function () {
       hideMenus();
       copyLink();
@@ -208,8 +257,9 @@
     $('sam-back').addEventListener('click', function () { DP.navAction('back'); });
     $('sam-fwd').addEventListener('click', function () { DP.navAction('forward'); });
     $('sam-home').addEventListener('click', function () { showStart('samsung'); });
-    $('sam-tabs').addEventListener('click', function () { DP.toast('🗂️ Tabs are decorative in DevPhone'); });
-    $('sam-menu').addEventListener('click', function (e) {
+    $('sam-tabs').addEventListener('click', function () { DP.toast('🗂️ Tabs are decorative'); });
+    // menu opens on MOUSEDOWN — first press lands
+    $('sam-menu').addEventListener('mousedown', function (e) {
       e.stopPropagation();
       $('sam-menu-pop').hidden = !$('sam-menu-pop').hidden;
     });
@@ -227,7 +277,8 @@
       if (n) n.hidden = true;
     });
   }
-  document.addEventListener('click', function (e) {
+  // close on the FIRST press anywhere else (mousedown, not click)
+  document.addEventListener('mousedown', function (e) {
     if (!e.target.closest('.menu-pop') && !e.target.closest('#chr-menu') && !e.target.closest('#sam-menu')) hideMenus();
   });
 
@@ -280,6 +331,9 @@
     collapsed = on;
     var bc = chromeRoot().querySelector('.bc-safari');
     if (bc) bc.classList.toggle('collapsed', on);
+    // content area grows/shrinks with the pill (real dvh behavior); the
+    // resize is CSS-animated and the viewport re-send is debounced ~250ms
+    relayout();
   }
 
   DP.bus.on('scroll', function (y) {
@@ -311,6 +365,15 @@
       if (f) f.disabled = !DP.state.canGoForward;
     });
   }
+
+  // global settings changed (e.g. address-bar position) → rebuild Chrome bar
+  DP.bus.on('settings-changed', function () {
+    if (current && current.type === 'browser' && current.browser === 'chrome') {
+      renderChromeAndroid();
+      chromeRoot().hidden = false;
+      updateBars();
+    }
+  });
 
   DP.bus.on('navstate', updateBars);
   DP.bus.on('navigated', function (info) {
@@ -470,7 +533,7 @@
   function beginAddToHome(style) {
     var pageUrl = DP.state.url;
     if (!isWeb(pageUrl)) { DP.toast('Open a website first'); return; }
-    DP.toast('🔍 Reading web-app manifest…', 1800);
+    DP.toast('🔍 Reading manifest…', 1600);
     DP.invoke('pwa:manifest', { pageUrl: pageUrl }).then(function (res) {
       var ok = res && res.ok;
       var info = {
@@ -480,7 +543,7 @@
         display: (ok && res.display) || 'browser',
         themeColor: (ok && res.themeColor) || null
       };
-      if (!ok) DP.toast('ℹ️ No manifest — adding as bookmark app');
+      if (!ok) DP.toast('ℹ️ No manifest — added as bookmark', 2200);
       confirmAddToHome(info, style);
     });
   }
@@ -541,7 +604,7 @@
       };
       closeSheet();
       if (DP.home) DP.home.installApp(app);
-      DP.toast('✅ "' + app.name + '" added to Home Screen');
+      DP.toast('✅ Added to Home Screen', 2200);
       setTimeout(function () { DP.goHome(); }, 350);
     });
   }
@@ -575,6 +638,7 @@
     updateBars();
     DP.applyStatusTheme();
     DP.updateHomeIndicator();
+    relayout();
   }
 
   function launchApp(app) {
@@ -598,7 +662,8 @@
     DP.state.themeColor = app.themeColor || null;
     DP.applyStatusTheme();
     DP.updateHomeIndicator();
-    DP.toast('▶️ ' + app.name + ' (standalone)');
+    relayout();   // Android: black status strip; iOS: edge-to-edge
+    DP.toast('▶️ ' + app.name, 2000);
   }
 
   function close() {
@@ -614,6 +679,7 @@
     open: open,
     close: close,
     launchApp: launchApp,
+    getInsets: getInsets,
     isOpen: function () { return !!current; }
   };
 

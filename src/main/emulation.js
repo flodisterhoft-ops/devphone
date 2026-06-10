@@ -202,17 +202,25 @@ async function applyDevice(wc, device, options) {
   const vp = device.viewport || { width: 390, height: 844 };
   const dpr = device.dpr || 2;
 
+  // v0.1.1: the renderer may override the CONTENT viewport (page laid out
+  // between the phone's bars). screenWidth/Height stay the device's full
+  // viewport — screen.width/height keep reporting the real phone screen.
+  const ovr = ctx.state ? ctx.state.viewportOverride : null;
+  const contentW = (ovr && ovr.width) || vp.width;
+  const contentH = (ovr && ovr.height) || vp.height;
+
   await cdp('Emulation.setDeviceMetricsOverride', {
-    width: vp.width,
-    height: vp.height,
+    width: contentW,
+    height: contentH,
     deviceScaleFactor: dpr,
     mobile: true,
     screenWidth: vp.width,
     screenHeight: vp.height,
   });
 
-  await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-  await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+  // v0.1.1: input mode lives in central state — dom-ready re-applies must
+  // NOT reset a user-chosen mouse mode back to touch.
+  await applyInputModeCommands(cdp, ctx.state ? ctx.state.inputMode : 'touch');
 
   // UA: Electron-level (headers for the loader) + CDP (navigator.userAgent).
   try { wc.setUserAgent(device.ua); } catch (e) {}
@@ -268,6 +276,38 @@ async function applyDevice(wc, device, options) {
   });
 
   return { ok: true };
+}
+
+// v0.1.1: shared by applyDevice and setInputMode so the two can never drift.
+// touch (default): emulated touch, 5 points, mouse synthesizes touch events.
+// mouse: plain desktop mouse — text selection, drag-to-highlight, native
+// cursor. UA/metrics untouched (still a phone).
+async function applyInputModeCommands(cdp, mode) {
+  if (mode === 'mouse') {
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: false });
+  } else {
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
+  }
+}
+
+// v0.1.1: live input-mode switch on the attached screen webContents.
+async function setInputMode(wc, mode) {
+  if (!wc || wc.isDestroyed()) return { ok: false, error: 'no screen attached' };
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+  } catch (e) { /* already attached — commands below will tell */ }
+  const cdp = async (method, params) => {
+    try {
+      return await wc.debugger.sendCommand(method, params);
+    } catch (e) {
+      return null;
+    }
+  };
+  const m = mode === 'mouse' ? 'mouse' : 'touch';
+  await applyInputModeCommands(cdp, m);
+  return { ok: true, mode: m };
 }
 
 async function setStandalone(wc, on) {
@@ -351,6 +391,7 @@ module.exports = {
   applyDevice,
   injectCfg,
   setStandalone,
+  setInputMode,
   setPicker,
   composePickText,
   getShimSource,

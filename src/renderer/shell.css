@@ -142,21 +142,105 @@ input { font-family: inherit; }
 
 .dev-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  gap: 11px;
   width: 100%;
   text-align: left;
   background: none;
   border: 0;
   border-radius: 11px;
-  padding: 9px 12px;
+  padding: 7px 10px;
   color: #e8ebf2;
 }
 .dev-row:hover { background: rgba(255, 255, 255, 0.08); }
 .dev-row.current { background: rgba(10, 132, 255, 0.22); }
+.dev-mini { flex: none; display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4)); }
+.dev-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .dev-name { font-size: 13.5px; font-weight: 600; }
 .dev-sub { font-size: 11px; color: #98a0ad; }
+
+/* pinned "check for new phones" row */
+.dev-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.05);
+  border: 0;
+  border-radius: 11px;
+  padding: 9px 12px;
+  margin-bottom: 4px;
+  color: #b9c2d0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dev-check:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.dev-check[disabled] { opacity: 0.75; cursor: default; }
+.dev-check .dc-ico { display: inline-block; font-size: 14px; }
+.dev-check .dc-ico.spin { animation: dp-spin 1s linear infinite; }
+@keyframes dp-spin { to { transform: rotate(360deg); } }
+
+/* ---------- settings popover --------------------------------------------- */
+
+#settings-popover {
+  -webkit-app-region: no-drag;
+  position: absolute;
+  right: calc(var(--rail-w) + var(--stage-pad) + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 232px;
+  background: rgba(26, 28, 35, 0.98);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 12px 12px 14px;
+  z-index: 300;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  color: #e8ebf2;
+}
+#settings-popover[hidden] { display: none; }
+.set-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+.set-sec {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8b93a2;
+  margin: 12px 1px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.set-note { font-size: 11.5px; color: #98a0ad; padding: 2px 1px; }
+.set-seg {
+  display: flex;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+.set-seg button {
+  flex: 1;
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  color: #aab1bd;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 4px;
+}
+.set-seg button:hover { color: #fff; }
+.set-seg button.on {
+  background: rgba(10, 132, 255, 0.32);
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
+}
 .new-badge, .est-badge {
   font-style: normal;
   font-size: 9px;
@@ -170,30 +254,46 @@ input { font-family: inherit; }
 .est-badge { background: rgba(255, 255, 255, 0.14); color: #b9c0cc; }
 
 /* ---------- screen stack ------------------------------------------------ */
-/* #screen itself (size, radius, clip) is defined in frames.css             */
+/* #screen itself (size, radius, clip) is defined in frames.css.            */
+/* The webview/canvas occupy the HONEST CONTENT AREA between bars —         */
+/* --content-top / --content-h / --nav-h are set by shell.js layoutContent. */
 
 #page {
   position: absolute;
-  left: 0; top: 0;
+  left: 0;
+  top: var(--content-top, 0px);
   width: var(--screen-w);
-  height: var(--screen-h);
+  height: var(--content-h, var(--screen-h));
   z-index: 1;
   background: #fff;
   display: flex;
+  transition: top 0.22s ease, height 0.22s ease;
 }
 
 #webkit-canvas {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: var(--content-top, 0px);
   width: 100%;
-  height: 100%;
+  height: var(--content-h, 100%);
   z-index: 2;
   display: none;
   background: #fff;
   outline: none;
+  transition: top 0.22s ease, height 0.22s ease;
 }
 body.engine-webkit #page { visibility: hidden; }
 body.engine-webkit #webkit-canvas { display: block; }
+
+/* no resize animation during device swaps */
+#screen.no-anim #page, #screen.no-anim #webkit-canvas { transition: none; }
+
+/* recents flourish (cosmetic) */
+#screen { transition: transform 0.18s ease; }
+#screen.recents-anim { transform: scale(0.86); }
+
+/* picker armed → shell side shows a plain arrow like the in-page cursor */
+body.picker-on #screen, body.picker-on #screen * { cursor: default !important; }
 
 #homescreen { position: absolute; inset: 0; z-index: 10; overflow: hidden; }
 #homescreen[hidden] { display: none; }
@@ -246,6 +346,48 @@ body.engine-webkit #webkit-canvas { display: block; }
   cursor: grab;
 }
 #home-gesture[hidden] { display: none; }
+
+/* ---------- Android 3-button navigation bar ------------------------------ */
+
+#navbar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 44px;
+  background: #000;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 52px;
+  -webkit-app-region: no-drag;
+}
+#navbar[hidden] { display: none; }
+#navbar button {
+  -webkit-app-region: no-drag;
+  background: none;
+  border: 0;
+  color: #fff;
+  opacity: 0.92;
+  width: 58px; height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#navbar button:active { background: rgba(255, 255, 255, 0.14); }
+
+/* ---------- Android standalone (installed PWA) status strip --------------- */
+/* Solid black, ~28px @1:1 — content starts BELOW it (no drawing under the
+   punch-out). The cutout (z 51) stays visible inside the strip.            */
+
+body.android-standalone #statusbar {
+  height: 28px;
+  background: #000;
+}
+body.android-standalone #statusbar .sb-android {
+  padding-top: 0;
+  font-size: 12px;
+}
 
 #open-anim-layer { position: absolute; inset: 0; z-index: 60; pointer-events: none; }
 .open-anim {
@@ -309,7 +451,7 @@ body.engine-webkit #webkit-canvas { display: block; }
 .hs {
   position: absolute; inset: 0;
   display: flex; flex-direction: column;
-  padding: calc(var(--sb-h, 59px) + 4px) 14px 20px;
+  padding: calc(var(--sb-h, 59px) + 4px) 14px calc(20px + var(--nav-h, 0px));
 }
 .hs-ios {
   background:
@@ -457,7 +599,8 @@ body.engine-webkit #webkit-canvas { display: block; }
 .bc-safari .saf-bar {
   position: absolute;
   left: 0; right: 0; bottom: 0;
-  background: rgba(249, 249, 251, 0.9);
+  /* near-opaque: the page no longer extends behind the bar (honest layout) */
+  background: rgba(249, 249, 251, 0.98);
   backdrop-filter: blur(18px) saturate(160%);
   border-top: 0.5px solid rgba(0, 0, 0, 0.14);
   padding: 8px 10px 26px;
@@ -582,6 +725,26 @@ body.engine-webkit #webkit-canvas { display: block; }
   letter-spacing: 0;
 }
 
+/* Chrome with the address bar at the BOTTOM (real Chrome-Android feature).
+   The bar sits above the (optional) 3-button navbar; only the status bar
+   remains at the top, backed by a white fill. */
+.bc-chrome.addr-bottom .chr-bar {
+  top: auto;
+  bottom: var(--nav-h, 0px);
+  padding: 8px 10px;
+  box-shadow: 0 -1px 3px rgba(0, 0, 0, 0.16);
+}
+.bc-chrome.addr-bottom .menu-pop {
+  top: auto;
+  bottom: calc(var(--nav-h, 0px) + 64px);
+}
+.chr-statusfill {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: var(--sb-h, 32px);
+  background: #fff;
+}
+
 .menu-pop {
   position: absolute;
   top: calc(var(--sb-h, 32px) + 50px);
@@ -657,7 +820,7 @@ body.engine-webkit #webkit-canvas { display: block; }
 }
 .bc-samsung .sam-bottom {
   position: absolute;
-  bottom: 0; left: 0; right: 0;
+  bottom: var(--nav-h, 0px); left: 0; right: 0;
   height: 54px;
   background: rgba(252, 252, 253, 0.97);
   border-top: 0.5px solid rgba(0, 0, 0, 0.12);
@@ -680,7 +843,7 @@ body.engine-webkit #webkit-canvas { display: block; }
 }
 .sam-menu-pop {
   position: absolute;
-  bottom: 60px; right: 8px; top: auto;
+  bottom: calc(60px + var(--nav-h, 0px)); right: 8px; top: auto;
 }
 
 /* ---------- start page ---------------------------------------------------- */
@@ -693,12 +856,12 @@ body.engine-webkit #webkit-canvas { display: block; }
 .sp-chrome {
   background: #fff;
   font-family: var(--font-android);
-  padding: calc(var(--sb-h, 32px) + 70px) 18px 30px;
+  padding: calc(var(--sb-h, 32px) + 70px) 18px calc(30px + var(--nav-h, 0px));
 }
 .sp-samsung {
   background: #fafafc;
   font-family: var(--font-android);
-  padding: calc(var(--sb-h, 32px) + 66px) 18px 76px;
+  padding: calc(var(--sb-h, 32px) + 66px) 18px calc(76px + var(--nav-h, 0px));
 }
 
 .sp-title { font-size: 24px; font-weight: 700; color: #111; margin: 2px 4px 14px; }
@@ -976,3 +1139,5 @@ body.engine-webkit #webkit-canvas { display: block; }
   transition: opacity 0.3s, transform 0.3s;
 }
 .toast.show { opacity: 1; transform: none; }
+/* quick fade-out (picker "Copied to clipboard" & friends) */
+.toast.hide { opacity: 0; transform: translateY(6px); transition-duration: 0.15s; }

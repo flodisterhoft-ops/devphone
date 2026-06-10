@@ -80,6 +80,9 @@ async function start(options) {
   const device = options && options.device;
   const url = (options && options.url) || 'about:blank';
   const standalone = !!(options && options.standalone);
+  // v0.1.1: optional content-viewport override (page laid out between the
+  // phone's bars) — mirrors the Chromium-side device:set viewport override.
+  const vpo = (options && options.viewport) || null;
   if (!device) return { ok: false, error: 'no device selected' };
 
   try {
@@ -96,8 +99,8 @@ async function start(options) {
 
     wk.context = await wk.browser.newContext({
       viewport: {
-        width: (device.viewport && device.viewport.width) || 390,
-        height: (device.viewport && device.viewport.height) || 844,
+        width: (vpo && vpo.width) || (device.viewport && device.viewport.width) || 390,
+        height: (vpo && vpo.height) || (device.viewport && device.viewport.height) || 844,
       },
       deviceScaleFactor: device.dpr || 2,
       isMobile: true,
@@ -328,7 +331,15 @@ async function setDevice(device, options) {
     device: device,
     url: (options && options.url) || (ctx.state && ctx.state.currentUrl) || 'about:blank',
     standalone: !!(options && options.standalone),
+    viewport: (options && options.viewport) || null,
   });
+}
+
+// v0.1.1: input:set lands here when the webkit engine is active. WebKit's
+// touch behavior is fixed at context creation (hasTouch) — accept the call
+// and decline gracefully so the IPC never throws in webkit mode.
+async function setInputMode() {
+  return { ok: false, error: 'webkit mode: input mode fixed' };
 }
 
 async function closeContext() {
@@ -389,6 +400,7 @@ module.exports = {
   input,
   setPicker,
   setStandalone,
+  setInputMode,
   setDevice,
   getLastFrame,
   captureFull,
