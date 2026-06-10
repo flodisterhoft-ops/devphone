@@ -1,0 +1,22 @@
+{
+  "name": "devphone",
+  "productName": "DevPhone",
+  "version": "0.1.0",
+  "description": "Phone-shaped mobile web simulator — realistic device frames, Chromium + true WebKit engines, home screen & PWA flow, element picker.",
+  "main": "src/main/main.js",
+  "author": "Florian Disterhoft",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "selftest": "electron . --selftest",
+    "webkit:install": "playwright install webkit",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

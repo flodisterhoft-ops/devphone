@@ -1,0 +1,10 @@
+node_modules/
+dist/
+pw-browsers/
+selftest*.png
+scratch/
+scratch/
+galaxy.log
+st.log
+galaxy-test.log
+selftest.json

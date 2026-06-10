@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>DevPhone</title>
+  <link rel="stylesheet" href="shell.css" />
+  <link rel="stylesheet" href="frames.css" />
+</head>
+<body>
+  <div id="stage">
+    <div id="phone-wrap">
+      <div id="phone" class="body-titanium-pro brand-apple os-ios">
+        <!-- hardware buttons (positioned per brand in frames.css) -->
+        <div class="hw hw-action"></div>
+        <div class="hw hw-volup"></div>
+        <div class="hw hw-voldown"></div>
+        <div class="hw hw-power"></div>
+        <!-- metal band + front glass face -->
+        <div class="frame-band"></div>
+        <div class="frame-face"></div>
+        <!-- classic home button (visible on body-aluminum only) -->
+        <button id="hw-home-button" title="Home" aria-label="Home"></button>
+
+        <div id="screen">
+          <!-- The webview preload MUST be an absolute file:// URL, which is
+               only known at runtime (devphone.screenPreloadPath). This inline
+               script runs before the parser reaches the webview tag below and
+               injects it with the correct attributes. -->
+          <script>
+            (function () {
+              var preloadUrl = (window.devphone && window.devphone.screenPreloadPath) || '';
+              document.write(
+                '<webview id="page" src="about:blank" partition="persist:devphone" ' +
+                (preloadUrl ? 'preload="' + preloadUrl + '" ' : '') +
+                'webpreferences="contextIsolation=no"></webview>'
+              );
+            })();
+          </script>
+          <canvas id="webkit-canvas" tabindex="0"></canvas>
+          <div id="homescreen"></div>
+          <div id="startpage" hidden></div>
+          <div id="browser-chrome" hidden></div>
+          <div id="sheet-layer" hidden></div>
+          <div id="statusbar" class="sb-light"></div>
+          <div id="cutout"></div>
+          <div id="home-indicator" hidden></div>
+          <div id="home-gesture" hidden></div>
+          <div id="open-anim-layer"></div>
+          <div id="glass"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside id="sidebar-controls">
+      <div class="rail-winctl">
+        <button id="btn-min" title="Minimize">–</button>
+        <button id="btn-close" title="Close">✕</button>
+      </div>
+      <button id="btn-device" class="rail-btn" title="Choose device">📱<span id="device-label">Device</span></button>
+      <button id="btn-engine" class="rail-btn" title="Rendering engine">⚡<span id="engine-label">Chromium</span></button>
+      <button id="btn-scale" class="rail-btn" title="Zoom">🔎<span id="scale-label">100%</span></button>
+      <div class="rail-sep"></div>
+      <button id="btn-picker" class="rail-btn" title="Element picker (Ctrl+Shift+P)">🎯<span>Pick</span></button>
+      <button id="btn-shot-screen" class="rail-btn" title="Screenshot page (Ctrl+Shift+S)">📸<span>Screen</span></button>
+      <button id="btn-shot-device" class="rail-btn" title="Screenshot whole phone">🖼️<span>Phone</span></button>
+      <div class="rail-sep"></div>
+      <button id="btn-rotate" class="rail-btn" title="Rotate">🔄<span>Rotate</span></button>
+      <button id="btn-home" class="rail-btn" title="Home">🏠<span>Home</span></button>
+      <button id="btn-updater" class="rail-btn" title="Check for new phones">📡<span>Check</span></button>
+    </aside>
+
+    <div id="device-popover" hidden></div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="shell.js"></script>
+  <script src="homescreen.js"></script>
+  <script src="browser-chrome.js"></script>
+</body>
+</html>

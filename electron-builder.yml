@@ -1,0 +1,29 @@
+# DevPhone packaging — per ARCHITECTURE.md.
+# Windows targets: nsis installer + portable exe. Playwright WebKit engines
+# travel inside resources/pw-browsers (main.js points
+# PLAYWRIGHT_BROWSERS_PATH there when packaged).
+
+appId: com.devphone.app
+productName: DevPhone
+
+directories:
+  output: dist
+
+files:
+  - package.json
+  - src/**/*
+  - devices/**/*
+
+extraResources:
+  - from: pw-browsers
+    to: pw-browsers
+
+win:
+  target:
+    - nsis
+    - portable
+
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false

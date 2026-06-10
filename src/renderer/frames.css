@@ -1,0 +1,326 @@
+/* ==========================================================================
+   DevPhone frames.css — realistic device bodies, pure CSS (no images).
+
+   Parameterized via custom properties set from shell.js on #phone:
+     --screen-w / --screen-h   device CSS viewport size (1:1, unscaled)
+     --corner-radius           screen corner radius
+     --body-radius             outer body radius (computed per bodyStyle)
+     --body-color              device accentColor
+     --bz-t / --bz-s / --bz-b  bezel top / side / bottom
+     --scale                   visual zoom (75/100/125%)
+   Plus classes: .body-<bodyStyle> .brand-<brand> .os-<os>
+   Cutouts (#cutout) get class: dynamic-island | notch | punch-hole | none
+   plus os-ios/os-android.
+   ========================================================================== */
+
+/* ---------- body shell ---------------------------------------------------- */
+
+#phone {
+  position: absolute;
+  top: 0; left: 0;
+  width: calc(var(--screen-w, 440px) + var(--bz-s, 17px) * 2);
+  height: calc(var(--screen-h, 956px) + var(--bz-t, 17px) + var(--bz-b, 17px));
+  border-radius: var(--body-radius, 70px);
+  background: var(--body-color, #2c2c2e);
+  transform: scale(var(--scale, 1));
+  transform-origin: top left;
+  -webkit-app-region: drag;
+  /* the window is transparent — this shadow grounds the phone */
+  filter: drop-shadow(0 30px 48px rgba(0, 0, 0, 0.40))
+          drop-shadow(0 8px 16px rgba(0, 0, 0, 0.30));
+}
+
+/* metal band (outer ring) */
+.frame-band {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35),
+              inset 0 -1px 1px rgba(0, 0, 0, 0.55);
+}
+
+/* front glass face (black bezel around the screen) */
+.frame-face {
+  position: absolute;
+  inset: var(--band-w, 5px);
+  z-index: 2;
+  border-radius: calc(var(--body-radius, 70px) - var(--band-w, 5px));
+  background: linear-gradient(180deg, #17171b 0%, #050507 28%, #000 65%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05),
+              inset 0 1.5px 1px rgba(255, 255, 255, 0.09);
+}
+
+/* the screen itself */
+#screen {
+  position: absolute;
+  left: var(--bz-s, 17px);
+  top: var(--bz-t, 17px);
+  width: var(--screen-w, 440px);
+  height: var(--screen-h, 956px);
+  z-index: 3;
+  border-radius: var(--corner-radius, 0px);
+  background: #000;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
+}
+
+/* faint glass reflection across the top corner of the screen */
+#glass {
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+  border-radius: var(--corner-radius, 0px);
+  background: linear-gradient(118deg,
+      rgba(255, 255, 255, 0.075) 0%,
+      rgba(255, 255, 255, 0.025) 13%,
+      rgba(255, 255, 255, 0) 26%);
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* ---------- hardware buttons ---------------------------------------------- */
+
+#phone .hw {
+  position: absolute;
+  z-index: 0;
+  width: 5px;
+  background: linear-gradient(90deg, #9a9aa0, #57575d);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.45),
+              inset 0 -1px 1px rgba(0, 0, 0, 0.45);
+}
+#phone .hw-action { display: none; }
+
+/* iPhone: action + volume left, power right */
+.brand-apple .hw-action  { left: -3px; top: 116px; height: 32px; border-radius: 2.5px 0 0 2.5px; }
+.brand-apple .hw-volup   { left: -3px; top: 184px; height: 62px; border-radius: 2.5px 0 0 2.5px; }
+.brand-apple .hw-voldown { left: -3px; top: 258px; height: 62px; border-radius: 2.5px 0 0 2.5px; }
+.brand-apple .hw-power   { right: -3px; top: 222px; height: 98px; border-radius: 0 2.5px 2.5px 0; }
+.body-titanium-pro .hw-action { display: block; }
+
+/* Samsung: everything on the right side */
+.brand-samsung .hw-volup   { right: -3px; top: 178px; height: 56px; border-radius: 0 2.5px 2.5px 0; }
+.brand-samsung .hw-voldown { right: -3px; top: 240px; height: 56px; border-radius: 0 2.5px 2.5px 0; }
+.brand-samsung .hw-power   { right: -3px; top: 312px; height: 62px; border-radius: 0 2.5px 2.5px 0; }
+
+/* small phones: keep buttons in the upper third */
+.body-aluminum .hw-volup   { top: 150px; height: 48px; }
+.body-aluminum .hw-voldown { top: 208px; height: 48px; }
+.body-aluminum .hw-action  { display: block; left: -3px; top: 108px; height: 26px; border-radius: 2.5px 0 0 2.5px; } /* ring/silent switch */
+.body-aluminum .hw-power   { top: 168px; height: 64px; }
+
+/* ---------- bodyStyle: titanium-pro (iPhone Pro) --------------------------- */
+
+.body-titanium-pro { --band-w: 5px; }
+.body-titanium-pro .frame-band {
+  background:
+    /* antenna line breaks in the band */
+    linear-gradient(rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 0 16% / 5px 3px,
+    linear-gradient(rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 100% 16% / 5px 3px,
+    linear-gradient(rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 0 88% / 5px 3px,
+    linear-gradient(rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 100% 88% / 5px 3px,
+    linear-gradient(90deg, rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 22% 0 / 3px 5px,
+    linear-gradient(90deg, rgba(225, 227, 232, 0.65), rgba(225, 227, 232, 0.65)) no-repeat 78% 100% / 3px 5px,
+    /* brushed titanium */
+    linear-gradient(165deg, #b3b3b9 0%, #84848a 16%, #5a5a60 42%,
+                            #4e4e54 55%, #6d6d73 78%, #a5a5ab 100%);
+}
+.body-titanium-pro .hw {
+  background: linear-gradient(90deg, #c0c0c6, #76767c 50%, #5a5a60);
+}
+
+/* ---------- bodyStyle: aluminum (classic iPhone, big bezels) --------------- */
+
+.body-aluminum { --band-w: 4px; }
+.body-aluminum .frame-band {
+  background: linear-gradient(165deg, #55555a 0%, #3a3a3f 22%, #232327 55%,
+                                      #313136 82%, #4c4c51 100%);
+}
+.body-aluminum .frame-face {
+  background: linear-gradient(180deg, #131316 0%, #0a0a0c 40%, #060608 100%);
+}
+.body-aluminum .hw {
+  background: linear-gradient(90deg, #6c6c72, #3c3c41);
+}
+
+/* earpiece slot in the forehead */
+.body-aluminum .frame-face::before {
+  content: '';
+  position: absolute;
+  top: calc(var(--bz-t, 88px) / 2 - 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58px; height: 7px;
+  border-radius: 4px;
+  background: #1a1a1d;
+  box-shadow: inset 0 1.5px 2px rgba(0, 0, 0, 0.9),
+              0 0.5px 0 rgba(255, 255, 255, 0.06);
+}
+/* front camera dot left of the earpiece */
+.body-aluminum .frame-face::after {
+  content: '';
+  position: absolute;
+  top: calc(var(--bz-t, 88px) / 2 - 9px);
+  left: calc(50% - 56px);
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 30%, #2b3245 0%, #10131c 55%, #050608 100%);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.04);
+}
+
+/* the clickable home button in the chin */
+#hw-home-button {
+  display: none;
+  position: absolute;
+  bottom: calc((var(--bz-b, 88px) - 58px) / 2 - 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 58px; height: 58px;
+  border: 0;
+  border-radius: 50%;
+  z-index: 4;
+  background: radial-gradient(circle at 35% 28%, #1c1c1f 0%, #0b0b0d 70%);
+  box-shadow: inset 0 0 0 2.5px #2f2f33,
+              inset 0 2px 4px rgba(0, 0, 0, 0.7),
+              0 0 0 1px rgba(255, 255, 255, 0.04);
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+}
+#hw-home-button:active { filter: brightness(1.5); }
+.body-aluminum #hw-home-button { display: block; }
+/* squircle hint engraved on the home button */
+#hw-home-button::after {
+  content: '';
+  position: absolute;
+  inset: 17px;
+  border-radius: 7px;
+  border: 1.5px solid rgba(255, 255, 255, 0.16);
+}
+
+/* ---------- bodyStyle: glass-android (flagship Samsung) -------------------- */
+
+.body-glass-android { --band-w: 3.5px; }
+.body-glass-android .frame-band {
+  background: linear-gradient(165deg, #d4d7dc 0%, #9aa0a8 14%, #5e646c 40%,
+                                      #4a5058 56%, #767c84 80%, #c8cbd2 100%);
+}
+.body-glass-android .frame-face {
+  background: linear-gradient(180deg, #101014 0%, #040406 35%, #000 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+              inset 0 1px 1px rgba(255, 255, 255, 0.10);
+}
+.body-glass-android .hw {
+  background: linear-gradient(270deg, #c9ccd2, #80858d 50%, #5f646c);
+}
+
+/* ---------- bodyStyle: budget-android (matte plastic) ---------------------- */
+
+.body-budget-android { --band-w: 4px; }
+.body-budget-android .frame-band {
+  background: linear-gradient(165deg, #43464e 0%, #32353c 20%, #24262c 55%,
+                                      #2b2d34 85%, #3c3f46 100%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.16),
+              inset 0 -1px 1px rgba(0, 0, 0, 0.5);
+}
+.body-budget-android .frame-face {
+  background: linear-gradient(180deg, #101115 0%, #07080b 40%, #020203 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+.body-budget-android .hw {
+  background: linear-gradient(270deg, #4a4d55, #2c2e35);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.2),
+              inset 0 -1px 1px rgba(0, 0, 0, 0.4);
+}
+
+/* ---------- cutouts (drawn INSIDE the screen, above the page) -------------- */
+
+/* Dynamic Island */
+#cutout.dynamic-island::before {
+  content: '';
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 124px; height: 36px;
+  border-radius: 19px;
+  background: #000;
+  box-shadow: inset 0 0 3px rgba(255, 255, 255, 0.05),
+              0 0 0 0.5px rgba(255, 255, 255, 0.05);
+}
+#cutout.dynamic-island::after {
+  /* camera inside the island */
+  content: '';
+  position: absolute;
+  top: 23px;
+  left: calc(50% + 33px);
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #232c44 0%, #0a0d16 55%, #000 100%);
+}
+
+/* punch hole (flagship Android) */
+#cutout.punch-hole::before {
+  content: '';
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+#cutout.punch-hole::after {
+  content: '';
+  position: absolute;
+  top: 14.5px;
+  left: calc(50% - 3.5px);
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #1d2538 0%, #070a11 60%, #000 100%);
+}
+
+/* notch — Android waterdrop */
+#cutout.notch.os-android::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 32px; height: 22px;
+  border-radius: 0 0 17px 17px;
+  background: #000;
+}
+#cutout.notch.os-android::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: calc(50% - 5px);
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #1d2538 0%, #070a11 60%, #000 100%);
+}
+
+/* notch — wide iPhone-style (if such a device appears) */
+#cutout.notch.os-ios::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px; height: 30px;
+  border-radius: 0 0 20px 20px;
+  background: #000;
+}
+#cutout.notch.os-ios::after {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: calc(50% + 38px);
+  width: 11px; height: 11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 32%, #232c44 0%, #0a0d16 55%, #000 100%);
+}
+
+/* no cutout */
+#cutout.none::before, #cutout.none::after { content: none; }
