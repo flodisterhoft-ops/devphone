@@ -22,6 +22,10 @@ win:
   target:
     - nsis
     - portable
+  # We don't code-sign; skipping the exe-edit step also avoids the
+  # winCodeSign cache extraction, which needs symlink privileges
+  # (Developer Mode / admin) that normal Windows accounts lack.
+  signAndEditExecutable: false
 
 nsis:
   oneClick: true
