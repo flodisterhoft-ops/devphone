@@ -14,6 +14,11 @@ const { app, BrowserWindow, Menu } = require('electron');
 
 const ROOT = path.join(__dirname, '..', '..');
 
+// Match real-phone media behavior: pages may autoplay only MUTED video;
+// audible playback needs a user gesture. Electron's default
+// ('no-user-gesture-required') let any site blast audio on load.
+app.commandLine.appendSwitch('autoplay-policy', 'user-gesture-required');
+
 // v0.1.2: parallel-safe test plumbing — an explicit userData dir (Playwright-
 // Electron harnesses give each instance its own) MUST be set before 'ready'.
 if (process.env.DEVPHONE_USERDATA) {
