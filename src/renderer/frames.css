@@ -24,10 +24,16 @@
   background: var(--body-color, #2c2c2e);
   transform: scale(var(--scale, 1));
   transform-origin: top left;
-  -webkit-app-region: drag;
-  /* the window is transparent — this shadow grounds the phone */
-  filter: drop-shadow(0 30px 48px rgba(0, 0, 0, 0.40))
-          drop-shadow(0 8px 16px rgba(0, 0, 0, 0.30));
+  /* no-drag: drag regions are HTCAPTION on Windows — right-clicks there go
+     to the system menu and never reach the DOM, which would kill the bezel
+     context menu (always-on-top). The window is dragged by the surrounding
+     shadow margin (#stage) and the rail instead. */
+  -webkit-app-region: no-drag;
+  /* the window is transparent — this shadow grounds the phone. Sized to
+     fade FULLY inside the 48px shadow margin (shell.js PAD, scaled with
+     --scale like this shadow): max extent ≈ offset + 1.5×blur ≈ 41px. */
+  filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.42))
+          drop-shadow(0 5px 8px rgba(0, 0, 0, 0.30));
 }
 
 /* metal band (outer ring) */

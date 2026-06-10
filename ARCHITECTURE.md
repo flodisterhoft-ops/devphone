@@ -406,3 +406,72 @@ to hang until the watchdog. `selftest-screen.png` now comes from
 `webkit.captureFull()` (device-scale PNG) when engineMode is webkit; the
 chromium path is bounded by a 10s race. Step timings are logged as
 `SELFTEST TIMING …`.
+
+## v0.1.3 extensions (UI, + one sanctioned IPC)
+
+### New IPC: `shell:alwaysOnTop {on}` → `{ok, on}`
+
+`win.setAlwaysOnTop(!!on)` (ipc.js) + preload allowlist entry
+(`devphone.shellAlwaysOnTop(on)`). The renderer persists the flag in
+localStorage (`devphone.alwaysontop`) and re-applies it at boot. Reachable
+from the ⚙ Settings popover ("Window · 📌 Always on top") and a custom
+right-click context menu (#ctx-menu) on the phone bezel / shadow margin
+(also offers Minimize/Close).
+
+### Shadow margin
+
+`PAD` (shell.js) is now a 48px transparent SHADOW MARGIN, scaled with the
+phone scale and pushed to CSS as `--stage-pad`; window size =
+phone·scale + 2·pad + gap + rail. The phone drop-shadow (frames.css) is
+sized to fade fully inside it (≈ offset + 1.5×blur ≤ 41px) — no hard clip
+at the window edge. Drag regions: `#stage` (the margin) and the rail are
+the drag areas; `#phone` is now NO-drag — drag regions are HTCAPTION on
+Windows, which would swallow bezel right-clicks (system menu, no DOM
+events).
+
+### Context-menu under touch emulation (probe-verified)
+
+While the guest's touch emulation is active it hooks the whole window:
+right-button down/up never reach the shell DOM; Chromium synthesizes a
+keyboard-style `contextmenu` with `button === -1` at the FOCUSED element
+with bogus coordinates (scratch/probe-ctx2.js). The renderer treats any
+`button === -1` contextmenu as a bezel right-click (a touch-mode phone
+page has no right-click concept) and anchors the menu to the phone's top
+bezel; real mouse-mode right-clicks are scoped to bezel/margin only.
+
+### Cursor + input-mode scoping
+
+The touch experience exists ONLY over the page content area: a fingertip
+cursor on `#touch-layer` / `#webkit-canvas` via `body.input-touch`
+(toggled by setInputMode). Everything else — rail, shadow margin, chrome
+bars, popovers, home screen — keeps normal desktop cursors.
+
+### Shell text inputs: desktop-native in BOTH input modes
+
+The old first-click-select-all mouseup suppressor + caret-on-click
+collapsed drag selections (the v0.1.2 known bug). Replaced by a pointer-
+events controller that fully owns shell-input interaction (native mouse
+defaults on those inputs are preventDefault-ed): first click → select
+all; stationary second click → caret (canvas text measurement); press
+moved >3px → live arbitrary drag selection (never overridden);
+double-click → word; triple-click → select all. Inputs get
+`touch-action:none` so pointermove streams under touch emulation.
+
+### Guest WebAuthn shim (tap-beacon injection)
+
+Chromium exposes `PublicKeyCredential`, so passkey-first sites (e.g. the
+Skycrew portal) hide their PIN UI — but `navigator.credentials.get()`
+can never complete inside the webview, hanging "Sign In" forever. The
+per-load guest injection now wraps `credentials.get/create`: publicKey
+requests reject after ~400ms with `NotAllowedError` (= user cancelled
+Face ID), so pages fall into their own PIN/password fallback.
+non-publicKey requests pass through.
+
+### syntheticTap fidelity
+
+The dispatched sequence now carries `buttons:1` on the down phase /
+`buttons:0` up, `detail:1`, `composed:true` and pressure, in the order
+pointerdown → mousedown → focus → pointerup → mouseup → click. Suite
+scenario S13 replicates the portal pattern locally (click-bound card +
+capture-phase document listener); S9–S12 cover selection, shadow margin,
+always-on-top and cursor scoping. test-ui-v012: 27 scenarios.

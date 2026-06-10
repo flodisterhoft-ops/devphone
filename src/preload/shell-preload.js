@@ -27,6 +27,7 @@ const INVOKE_CHANNELS = [
   'input:set', // v0.1.1: 'touch' | 'mouse'
   'shell:activate', // v0.1.1: focus the OS window before a click lands
   'shell:resize',
+  'shell:alwaysOnTop', // v0.1.3: window pinning
   'shell:minimize',
   'shell:close',
   'open:external',
@@ -83,6 +84,8 @@ const api = {
   inputSet: (mode) => invoke('input:set', { mode }), // v0.1.1: 'touch' | 'mouse'
   shellActivate: () => invoke('shell:activate'), // v0.1.1: first-click fix
   shellResize: (width, height) => invoke('shell:resize', { width, height }),
+  shellAlwaysOnTop: (onFlag) => invoke('shell:alwaysOnTop', { on: onFlag }), // v0.1.3
+
   shellMinimize: () => invoke('shell:minimize'),
   shellClose: () => invoke('shell:close'),
   openExternal: (url) => invoke('open:external', { url }),

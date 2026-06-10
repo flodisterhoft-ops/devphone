@@ -12,7 +12,9 @@
 
   /* ---------- constants --------------------------------------------------- */
 
-  var PAD = 26;          // transparent margin around the phone (shadow room)
+  var PAD = 48;          // transparent SHADOW MARGIN around the phone (scaled
+                         // with phone scale) — the drop-shadow must fade fully
+                         // inside it, no hard clip at the window edge
   var RAIL_W = 86;       // control rail width
   var GAP = 12;          // gap between phone and rail
   var MIN_WIN_H = 600;   // rail needs at least this
@@ -64,6 +66,7 @@
     nav3: false,           // Android 3-button navigation (per device id)
     addrBar: 'top',        // Chrome address bar position (global)
     inputMode: 'touch',    // 'touch' | 'mouse' (global)
+    alwaysOnTop: false,    // window pinning (global)
     contentViewport: null  // {width,height} of the honest content area (unscaled)
   };
 
@@ -139,7 +142,7 @@
     ['stage', 'phone-wrap', 'phone', 'screen', 'page', 'webkit-canvas', 'touch-layer', 'homescreen',
      'startpage', 'browser-chrome', 'navbar', 'sheet-layer', 'statusbar', 'cutout',
      'home-indicator', 'home-gesture', 'open-anim-layer', 'glass', 'toasts',
-     'sidebar-controls', 'device-popover', 'settings-popover', 'click-catcher',
+     'sidebar-controls', 'device-popover', 'settings-popover', 'click-catcher', 'ctx-menu',
      'device-label', 'engine-label', 'scale-label', 'input-label',
      'hw-home-button',
      'btn-min', 'btn-close', 'btn-device', 'btn-engine', 'btn-input', 'btn-scale',
@@ -362,11 +365,14 @@
     var pw = d.viewport.width + m.side * 2;
     var ph = d.viewport.height + m.top + m.bottom;
     var s = state.scale;
+    var pad = Math.round(PAD * s);   // shadow margin scales with the phone
     el.phone.style.setProperty('--scale', s);
     el.phoneWrap.style.width = Math.ceil(pw * s) + 'px';
     el.phoneWrap.style.height = Math.ceil(ph * s) + 'px';
-    var w = Math.ceil(pw * s) + PAD * 2 + GAP + RAIL_W;
-    var h = Math.max(Math.ceil(ph * s) + PAD * 2, MIN_WIN_H);
+    // --stage-pad drives #stage padding AND the popover anchoring in CSS
+    document.documentElement.style.setProperty('--stage-pad', pad + 'px');
+    var w = Math.ceil(pw * s) + pad * 2 + GAP + RAIL_W;
+    var h = Math.max(Math.ceil(ph * s) + pad * 2, MIN_WIN_H);
     invoke('shell:resize', { width: w, height: h });
   }
 
@@ -507,6 +513,10 @@
   function setInputMode(mode, fromUser) {
     state.inputMode = mode === 'mouse' ? 'mouse' : 'touch';
     try { localStorage.setItem('devphone.inputmode', state.inputMode); } catch (e) {}
+    // cursor scoping: the fingertip cursor exists ONLY over the page content
+    // area (#touch-layer / #webkit-canvas) and only in touch mode — the rest
+    // of the shell always shows normal desktop cursors (shell.css)
+    document.body.classList.toggle('input-touch', state.inputMode === 'touch');
     updateInputBtn();
     invoke('input:set', { mode: state.inputMode });
     if (fromUser) {
@@ -524,6 +534,18 @@
     el.btnInput.title = mouse
       ? 'Input: Mouse — precise cursor + text selection. Click for Touch.'
       : 'Input: Touch — swipes & flick-scroll like a finger. Click for Mouse.';
+  }
+
+  /* ---------- always on top ----------------------------------------------------
+     New IPC shell:alwaysOnTop {on} (the one allowed main/preload extension).
+     Persisted globally; re-applied at boot. Reachable from the ⚙ popover AND
+     a right-click context menu on the phone bezel / shadow margin.          */
+
+  function setAlwaysOnTop(on) {
+    state.alwaysOnTop = !!on;
+    try { localStorage.setItem('devphone.alwaysontop', on ? '1' : '0'); } catch (e) {}
+    invoke('shell:alwaysOnTop', { on: state.alwaysOnTop });
+    renderSettingsPopover();
   }
 
   /* ---------- settings popover ------------------------------------------------ */
@@ -547,6 +569,10 @@
         '<button data-v="top" class="' + (state.addrBar !== 'bottom' ? 'on' : '') + '">Top</button>' +
         '<button data-v="bottom" class="' + (state.addrBar === 'bottom' ? 'on' : '') + '">Bottom</button>' +
       '</div>';
+    html += '<div class="set-sec">Window</div>' +
+      '<button class="set-row" id="set-aot">📌 Always on top' +
+        '<span class="set-check">' + (state.alwaysOnTop ? '✓' : '✗') + '</span>' +
+      '</button>';
     pop.innerHTML = html;
   }
 
@@ -825,7 +851,21 @@
     if (!wv || typeof wv.executeJavaScript !== 'function') return;
     var js = '(function(){if(window.__dpTapBeacon)return;window.__dpTapBeacon=1;' +
              'document.addEventListener("pointerdown",function(){' +
-             'try{console.log("__DEVPHONE_TAP__")}catch(e){}},{capture:true,passive:true});})()';
+             'try{console.log("__DEVPHONE_TAP__")}catch(e){}},{capture:true,passive:true});' +
+             // WebAuthn: Chromium exposes PublicKeyCredential, so passkey-first
+             // sites (e.g. the Skycrew portal) switch to "Sign In with Face /
+             // Fingerprint" — but navigator.credentials.get() can never
+             // complete inside this webview (no authenticator UI), leaving
+             // the page stuck on "Waiting…" forever. Behave like a user who
+             // cancelled Face ID: reject promptly with NotAllowedError so the
+             // page falls into its own PIN/password fallback path.
+             'try{var cc=navigator.credentials;' +
+             'if(cc&&cc.get){var og=cc.get.bind(cc),oc=cc.create?cc.create.bind(cc):null;' +
+             'var cancel=function(){return new Promise(function(_,rej){setTimeout(function(){' +
+             'rej(new DOMException("The operation either timed out or was not allowed.","NotAllowedError"))},400)})};' +
+             'cc.get=function(o){return(o&&o.publicKey)?cancel():og(o)};' +
+             'if(oc)cc.create=function(o){return(o&&o.publicKey)?cancel():oc(o)};}}catch(e){}' +
+             '})()';
     try { Promise.resolve(wv.executeJavaScript(js)).catch(function () {}); } catch (e) {}
   }
 
@@ -872,15 +912,20 @@
         'var k=(w&&window.innerWidth)?(window.innerWidth/w):1;' +
         'x=Math.round(x*k);y=Math.round(y*k);' +
         'var el=document.elementFromPoint(x,y)||document.body;' +
-        'var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,button:0,pointerId:1,pointerType:"touch",isPrimary:true};' +
-        'try{el.dispatchEvent(new PointerEvent("pointerdown",o))}catch(e){}' +
-        'try{el.dispatchEvent(new MouseEvent("mousedown",o))}catch(e){}' +
+        // faithful sequence: pointerdown/mousedown carry buttons:1, the up/
+        // click phase buttons:0; detail:1 and composed:true throughout so
+        // capture-phase document listeners and shadow DOM delegates all fire
+        'var base={bubbles:true,cancelable:true,composed:true,view:window,clientX:x,clientY:y,button:0,detail:1};' +
+        'var dn=Object.assign({},base,{buttons:1,pointerId:1,pointerType:"touch",isPrimary:true,pressure:0.5});' +
+        'var up=Object.assign({},base,{buttons:0,pointerId:1,pointerType:"touch",isPrimary:true,pressure:0});' +
+        'try{el.dispatchEvent(new PointerEvent("pointerdown",dn))}catch(e){}' +
+        'try{el.dispatchEvent(new MouseEvent("mousedown",dn))}catch(e){}' +
         'var ed=null,n=el;while(n&&n.tagName){var t=n.tagName;' +
         'if(n.isContentEditable||t==="INPUT"||t==="TEXTAREA"||t==="SELECT"){ed=n;break}n=n.parentElement}' +
         'if(ed){try{ed.focus()}catch(e){}}' +
-        'try{el.dispatchEvent(new PointerEvent("pointerup",o))}catch(e){}' +
-        'try{el.dispatchEvent(new MouseEvent("mouseup",o))}catch(e){}' +
-        'try{if(typeof el.click==="function")el.click();else el.dispatchEvent(new MouseEvent("click",o))}catch(e){}' +
+        'try{el.dispatchEvent(new PointerEvent("pointerup",up))}catch(e){}' +
+        'try{el.dispatchEvent(new MouseEvent("mouseup",up))}catch(e){}' +
+        'try{if(typeof el.click==="function")el.click();else el.dispatchEvent(new MouseEvent("click",up))}catch(e){}' +
         'return ed?"editable":"tapped"}catch(e){return "err"}})(' +
         local.x + ',' + local.y + ',' + w + ')';
       try {
@@ -1424,6 +1469,7 @@
     });
 
     if (el.settingsPopover) el.settingsPopover.addEventListener('click', function (e) {
+      if (e.target.closest('#set-aot')) { setAlwaysOnTop(!state.alwaysOnTop); return; }
       var btn = e.target.closest('.set-seg button');
       if (!btn) return;
       var seg = btn.parentElement.getAttribute('data-set');
@@ -1477,6 +1523,75 @@
       } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
         e.preventDefault(); takeShot('screen');
       }
+    });
+  }
+
+  /* ---------- bezel context menu ----------------------------------------------
+     Right-click on the phone BEZEL / edge / shadow margin → small custom menu
+     with the always-on-top toggle (+ Minimize / Close). Not over the screen
+     (pages own their own context behavior) and not over the rail buttons.   */
+
+  function hideCtxMenu() {
+    if (el.ctxMenu) el.ctxMenu.hidden = true;
+  }
+
+  function showCtxMenu(x, y) {
+    var menu = el.ctxMenu;
+    if (!menu) return;
+    menu.innerHTML =
+      '<button class="ctx-item" id="ctx-aot">📌 Always on top' +
+        '<span class="ctx-check">' + (state.alwaysOnTop ? '✓' : '✗') + '</span></button>' +
+      '<div class="ctx-sep"></div>' +
+      '<button class="ctx-item" id="ctx-min">Minimize</button>' +
+      '<button class="ctx-item" id="ctx-close">Close</button>';
+    menu.hidden = false;
+    // clamp inside the window
+    var mw = menu.offsetWidth, mh = menu.offsetHeight;
+    menu.style.left = Math.max(4, Math.min(x, window.innerWidth - mw - 4)) + 'px';
+    menu.style.top = Math.max(4, Math.min(y, window.innerHeight - mh - 4)) + 'px';
+    menu.querySelector('#ctx-aot').addEventListener('click', function () {
+      hideCtxMenu();
+      setAlwaysOnTop(!state.alwaysOnTop);
+      toast(state.alwaysOnTop ? '📌 Always on top' : 'Always on top off', 1600);
+    });
+    menu.querySelector('#ctx-min').addEventListener('click', function () {
+      hideCtxMenu();
+      invoke('shell:minimize');
+    });
+    menu.querySelector('#ctx-close').addEventListener('click', function () {
+      invoke('shell:close');
+    });
+  }
+
+  function wireCtxMenu() {
+    document.addEventListener('contextmenu', function (e) {
+      // While the guest's touch emulation is active it hooks the WHOLE
+      // window: the right-button down/up never reach the DOM and Chromium
+      // synthesizes a keyboard-style contextmenu (button === -1) at the
+      // FOCUSED element with bogus coordinates (verified:
+      // scratch/probe-ctx2.js). A phone in touch mode has no in-page
+      // right-click concept anyway, so a synthesized right-click always
+      // opens the shell menu, anchored to the phone's top bezel. Real
+      // (mouse-mode) right-clicks are scoped: bezel/edge/shadow margin
+      // only — the screen and the rail keep their normal behavior.
+      if (e.button !== -1) {
+        var onScreen = e.target.closest && e.target.closest('#screen');
+        var onRail = e.target.closest && (e.target.closest('#sidebar-controls') ||
+                     e.target.closest('#device-popover') || e.target.closest('#settings-popover'));
+        if (onScreen || onRail || (el.ctxMenu && el.ctxMenu.contains(e.target))) return;
+        e.preventDefault();
+        showCtxMenu(e.clientX, e.clientY);
+        return;
+      }
+      e.preventDefault();
+      var r = el.phoneWrap ? el.phoneWrap.getBoundingClientRect() : { left: 20, top: 20 };
+      showCtxMenu(Math.round(r.left + 14), Math.round(r.top + 10));
+    });
+    document.addEventListener('mousedown', function (e) {
+      if (el.ctxMenu && !el.ctxMenu.hidden && !el.ctxMenu.contains(e.target)) hideCtxMenu();
+    }, true);
+    window.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') hideCtxMenu();
     });
   }
 
@@ -1587,44 +1702,108 @@
     //     shell received NO mouse events at all, so hover handlers were
     //     blind exactly when they were needed.
 
-    // 1c) shell text inputs: FIRST click into an unfocused input selects all
-    //     (mouseup suppressed so the selection survives); a SECOND single
-    //     click places the caret normally — inline editing without a
-    //     double-click. The suppressor is armed ONLY when the press that is
-    //     currently in flight is the one giving the input focus; programmatic
-    //     focus (e.g. the URL pill building its input on click) never arms
-    //     it, so it can't eat a later caret-placing click.
-    var selectAllArmed = false;
-    var pendingCaret = null;
+    // 1c) shell text inputs are DESKTOP-NATIVE in BOTH input modes (the
+    //     Touch/Mouse toggle governs the PAGE only — these are shell UI).
+    //     The guest's touch emulation hooks the whole window, so native
+    //     behavior over shell inputs is unreliable (touch mode: taps keep
+    //     selections, drags pan instead of selecting; and the old one-shot
+    //     mouseup suppressor + caret-on-click collapsed real drag
+    //     selections). Fix: the shell OWNS the entire interaction through
+    //     pointer events — the native mouse layer on these inputs is
+    //     suppressed — giving identical, desktop behavior in both modes:
+    //       · first click into an unfocused input → select all
+    //       · stationary second click → caret at the clicked character
+    //       · press that MOVED >3px → live drag selection of an arbitrary
+    //         range (never overridden afterwards)
+    //       · double-click → word select · triple-click → select all
+    function selectWordAt(input, idx) {
+      var v = input.value || '';
+      if (!v) return;
+      var re = /[A-Za-z0-9_]/;
+      var i = Math.max(0, Math.min(idx, v.length - 1));
+      if (!re.test(v[i]) && i > 0 && re.test(v[i - 1])) i--;
+      var a = i, b = i;
+      if (re.test(v[i])) {
+        while (a > 0 && re.test(v[a - 1])) a--;
+        while (b < v.length && re.test(v[b])) b++;
+      } else {
+        b = i + 1;                       // lone separator char
+      }
+      try { input.setSelectionRange(a, b); } catch (e) {}
+    }
+
+    var sip = null;                                       // press in flight
+    var lastClick = { el: null, time: 0, x: 0, y: 0, count: 0 };
+
     document.addEventListener('pointerdown', function (e) {
       var t = e.target;
-      var focusing = isTextualInput(t) && document.activeElement !== t;
-      selectAllArmed = !!focusing;
-      // SECOND single click on an already-focused input: under the emulated
-      // touch semantics a tap on selected text KEEPS the selection, so we
-      // collapse it to a caret at the tapped character ourselves — applied
-      // on the tap's final 'click' event (after all browser handling).
-      pendingCaret = (!focusing && isTextualInput(t))
-        ? { t: t, idx: caretIndexFromPoint(t, e.clientX) }
-        : null;
+      if (!isTextualInput(t) || e.button !== 0) { sip = null; return; }
+      if (sip && sip.t === t) return;   // duplicate down for the same press
+      var now = Date.now();
+      if (lastClick.el === t && now - lastClick.time < 450 &&
+          Math.abs(e.clientX - lastClick.x) < 6 && Math.abs(e.clientY - lastClick.y) < 6) {
+        lastClick.count++;
+      } else {
+        lastClick = { el: t, count: 1 };
+      }
+      lastClick.time = now;
+      lastClick.x = e.clientX;
+      lastClick.y = e.clientY;
+      sip = {
+        t: t,
+        idx: caretIndexFromPoint(t, e.clientX),
+        x0: e.clientX, y0: e.clientY,
+        moved: false,
+        wasFocused: document.activeElement === t,
+        count: lastClick.count
+      };
+      if (!sip.wasFocused) { try { t.focus(); } catch (err) {} }
+      try { t.setPointerCapture(e.pointerId); } catch (err) {}
     }, true);
-    document.addEventListener('click', function (e) {
-      if (!pendingCaret) return;
-      var pc = pendingCaret;
-      pendingCaret = null;
-      if (e.target !== pc.t || document.activeElement !== pc.t) return;
-      try { pc.t.setSelectionRange(pc.idx, pc.idx); } catch (err) {}
+
+    document.addEventListener('pointermove', function (e) {
+      if (!sip) return;
+      if (!sip.moved &&
+          Math.abs(e.clientX - sip.x0) <= 3 && Math.abs(e.clientY - sip.y0) <= 3) return;
+      sip.moved = true;                                   // it's a DRAG now
+      var cur = caretIndexFromPoint(sip.t, e.clientX);
+      try {
+        if (cur >= sip.idx) sip.t.setSelectionRange(sip.idx, cur, 'forward');
+        else sip.t.setSelectionRange(cur, sip.idx, 'backward');
+      } catch (err) {}
     }, true);
+
+    function sipEnd(e) {
+      if (!sip) return;
+      var s = sip;
+      sip = null;
+      if (e.type === 'pointercancel' || s.moved) return;  // drag selection stands
+      try {
+        if (s.count >= 3) s.t.setSelectionRange(0, (s.t.value || '').length);
+        else if (s.count === 2) selectWordAt(s.t, s.idx);
+        else if (!s.wasFocused) s.t.select();             // first click → all
+        else s.t.setSelectionRange(s.idx, s.idx);         // second click → caret
+      } catch (err) {}
+    }
+    document.addEventListener('pointerup', sipEnd, true);
+    document.addEventListener('pointercancel', sipEnd, true);
+
+    // the controller above owns focus/selection — silence the native mouse
+    // layer on shell text inputs so touch-emulated compat events (or native
+    // mouse defaults) can't fight it. Other listeners still run.
+    ['mousedown', 'mouseup', 'click', 'dblclick'].forEach(function (type) {
+      document.addEventListener(type, function (e) {
+        if (isTextualInput(e.target)) e.preventDefault();
+      }, true);
+    });
+
+    // keyboard focus (Tab) still selects all, like desktop address bars
     document.addEventListener('focusin', function (e) {
       var t = e.target;
       if (!isTextualInput(t)) return;
+      if (sip && sip.t === t) return;   // pointer controller decides this one
       try { t.select(); } catch (err) {}
     });
-    document.addEventListener('mouseup', function (e) {
-      if (!selectAllArmed) return;
-      selectAllArmed = false;
-      if (isTextualInput(e.target)) e.preventDefault();  // keep the select-all
-    }, true);
   }
 
   /* ---------- boot ------------------------------------------------------------ */
@@ -1639,13 +1818,18 @@
     wireGesture();
     wireEngineEvents();
     wireFocusFixes();
+    wireCtxMenu();
     renderNavbar();
     startClock();
 
     // global settings (loaded before the first applyDevice)
     try { state.addrBar = localStorage.getItem('devphone.addrbar') === 'bottom' ? 'bottom' : 'top'; } catch (e) {}
     try { state.inputMode = localStorage.getItem('devphone.inputmode') === 'mouse' ? 'mouse' : 'touch'; } catch (e) {}
+    document.body.classList.toggle('input-touch', state.inputMode === 'touch');
     updateInputBtn();
+    // always-on-top: persisted globally, re-applied at boot
+    try { state.alwaysOnTop = localStorage.getItem('devphone.alwaysontop') === '1'; } catch (e) {}
+    if (state.alwaysOnTop) invoke('shell:alwaysOnTop', { on: true });
 
     invoke('devices:list').then(function (res) {
       var devices = res && res.devices;

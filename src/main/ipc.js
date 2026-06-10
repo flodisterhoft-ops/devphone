@@ -246,6 +246,15 @@ function init(options) {
     return { ok: true };
   });
 
+  // v0.1.3: window pinning (UI-agent exception: this one handler + its
+  // preload allowlist entry). Persisted/re-applied by the renderer.
+  handle('shell:alwaysOnTop', async ({ on }) => {
+    const win = state.shellWindow;
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no shell window' };
+    win.setAlwaysOnTop(!!on);
+    return { ok: true, on: !!on };
+  });
+
   handle('shell:minimize', async () => {
     const win = state.shellWindow;
     if (win && !win.isDestroyed()) win.minimize();
