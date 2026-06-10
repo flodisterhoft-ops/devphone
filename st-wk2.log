@@ -1,0 +1,15 @@
+
+[renderer] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+[emulation] Emulation.setSafeAreaInsetsOverride unavailable in Chromium 130.0.6723.191 — needs Chromium >=136 (Electron >=36); env(safe-area-inset-*) stays 0.
+SELFTEST SHELL {"hasDevphone":true,"hasPage":true,"tag":"WEBVIEW","preloadAttr":"file:///C:/Users/Disterhoft/OneDrive/Documents/AI%20Projects","wcid":2,"src":"https://example.com/"}
+SELFTEST INFO innerWidth=440 innerHeight=831 dpr=3 platform=iPhone maxTouchPoints=5 standalone=false
+SELFTEST INFO ua=Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1
+SELFTEST INFO url=https://example.com/
+SELFTEST TIMING window capture took 733ms

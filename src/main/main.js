@@ -14,6 +14,14 @@ const { app, BrowserWindow, Menu } = require('electron');
 
 const ROOT = path.join(__dirname, '..', '..');
 
+// v0.1.2: parallel-safe test plumbing — an explicit userData dir (Playwright-
+// Electron harnesses give each instance its own) MUST be set before 'ready'.
+if (process.env.DEVPHONE_USERDATA) {
+  try { app.setPath('userData', process.env.DEVPHONE_USERDATA); } catch (e) {
+    console.error('[main] DEVPHONE_USERDATA setPath failed:', e && e.message);
+  }
+}
+
 process.env.PLAYWRIGHT_BROWSERS_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'pw-browsers')
   : path.join(ROOT, 'pw-browsers');
@@ -203,21 +211,33 @@ async function runSelftest(win) {
 
     // whole window - force it frontmost + freshly painted first, otherwise
     // capturePage can return an empty image for transparent windows.
+    const tCap = Date.now();
     try { win.setAlwaysOnTop(true); win.show(); win.focus(); } catch (_) {}
     await delay(600);
     let winImage = await win.webContents.capturePage();
     if (winImage.isEmpty()) { await delay(1000); winImage = await win.webContents.capturePage(); }
     const outPath = path.join(process.cwd(), 'selftest.png');
     fs.writeFileSync(outPath, winImage.toPNG());
+    console.log('SELFTEST TIMING window capture took ' + (Date.now() - tCap) + 'ms');
 
-    // just the webview contents
-    if (state.screenWC && !state.screenWC.isDestroyed()) {
-      try {
-        const screenImage = await state.screenWC.capturePage();
-        fs.writeFileSync(path.join(process.cwd(), 'selftest-screen.png'), screenImage.toPNG());
-      } catch (e) {
-        console.error('selftest screen capture failed:', e && e.message);
+    // just the screen contents. WebKit engine: the webview is hidden
+    // (renderer CSS) and capturePage on a hidden webContents never resolves —
+    // take the evidence from the engine instead, and keep the chromium path
+    // bounded by a timeout so the selftest can never hang here.
+    try {
+      const tScreen = Date.now();
+      const screenPath = path.join(process.cwd(), 'selftest-screen.png');
+      if (state.engineMode === 'webkit') {
+        const buf = (await webkit.captureFull()) || webkit.getLastFrame();
+        if (buf) fs.writeFileSync(screenPath, buf);
+      } else if (state.screenWC && !state.screenWC.isDestroyed()) {
+        const screenImage = await Promise.race([state.screenWC.capturePage(), delay(10000)]);
+        if (screenImage && !screenImage.isEmpty()) fs.writeFileSync(screenPath, screenImage.toPNG());
+        else console.error('selftest screen capture empty/timed out');
       }
+      console.log('SELFTEST TIMING screen capture took ' + (Date.now() - tScreen) + 'ms');
+    } catch (e) {
+      console.error('selftest screen capture failed:', e && e.message);
     }
 
     console.log('SELFTEST OK ./selftest.png');
@@ -248,7 +268,8 @@ async function runSelftest(win) {
 
 // Selftest runs use an isolated profile: a normal instance (or a zombie from
 // a crashed run) holding the default userData lock would make us die silently.
-if (SELFTEST) {
+// An explicit DEVPHONE_USERDATA (set above) takes precedence over the tmp dir.
+if (SELFTEST && !process.env.DEVPHONE_USERDATA) {
   try {
     app.setPath('userData', path.join(require('os').tmpdir(), 'devphone-selftest-' + process.pid));
   } catch (_) {}

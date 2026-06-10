@@ -24,7 +24,11 @@
   // into CSS custom properties so frames.css and window sizing never drift.
   var BODY_METRICS = {
     'titanium-pro':   { top: 17, side: 17, bottom: 17, body: function (r) { return r + 15; } },
-    'aluminum':       { top: 88, side: 19, bottom: 88, body: function ()  { return 58; } },
+    // modern non-Pro iPhone (14/15/16/17/Air): edge-to-edge glass, slim even
+    // bezels, a hair thicker than the Pro
+    'aluminum':       { top: 19, side: 19, bottom: 19, body: function (r) { return r + 16; } },
+    // classic home-button body (iPhone SE): symmetric big forehead/chin
+    'classic-button': { top: 88, side: 19, bottom: 88, body: function ()  { return 58; } },
     'glass-android':  { top: 13, side: 12, bottom: 16, body: function (r) { return r + 11; } },
     'budget-android': { top: 18, side: 14, bottom: 24, body: function (r) { return r + 12; } }
   };
@@ -132,10 +136,10 @@
 
   var el = {};
   function cacheEls() {
-    ['stage', 'phone-wrap', 'phone', 'screen', 'page', 'webkit-canvas', 'homescreen',
+    ['stage', 'phone-wrap', 'phone', 'screen', 'page', 'webkit-canvas', 'touch-layer', 'homescreen',
      'startpage', 'browser-chrome', 'navbar', 'sheet-layer', 'statusbar', 'cutout',
      'home-indicator', 'home-gesture', 'open-anim-layer', 'glass', 'toasts',
-     'sidebar-controls', 'device-popover', 'settings-popover',
+     'sidebar-controls', 'device-popover', 'settings-popover', 'click-catcher',
      'device-label', 'engine-label', 'scale-label', 'input-label',
      'hw-home-button',
      'btn-min', 'btn-close', 'btn-device', 'btn-engine', 'btn-input', 'btn-scale',
@@ -209,6 +213,64 @@
       return 20;
     }
     return 32;
+  }
+
+  /* ---------- per-device wallpaper colorways --------------------------------
+     One source of truth for the home-screen wallpaper AND the device-picker
+     mini icons, so a phone is recognizable at a glance ("release colorway").
+     Pure CSS gradients only. Returns { css, stops:[...] }.                  */
+
+  function wallpaperFor(d) {
+    d = d || {};
+    var id = String(d.id || '');
+    if (d.os === 'ios') {
+      if (d.bodyStyle === 'classic-button') {
+        // SE: quiet deep slate — the classic look
+        return {
+          stops: ['#5d7390', '#1a2330'],
+          css: 'linear-gradient(200deg,#5d7390 0%,#33415a 48%,#161e2b 100%)'
+        };
+      }
+      // flowing iOS aurora; hue follows the device generation
+      var gen = (id.match(/iphone-(\d+)/) || [])[1] || '';
+      if (id.indexOf('air') >= 0) gen = '17';
+      var GEN_HUES = {
+        '14': ['#8a5cf0', '#c084e8', '#1b1140'],   // 14s: violet
+        '15': ['#23c4ae', '#7fe3cd', '#072a33'],   // 15s: teal
+        '16': ['#3e7bf0', '#7fb4ff', '#0a1640'],   // 16s: ultramarine
+        '17': ['#ff8a45', '#ffc06e', '#3a1430']    // 17s/Air: cosmic orange
+      };
+      var c = GEN_HUES[gen] || ['#5e6ce0', '#9aa6ff', '#141a45'];
+      return {
+        stops: [c[1], c[0], c[2]],
+        css: 'radial-gradient(120% 85% at 18% 12%,' + c[0] + ' 0%,rgba(0,0,0,0) 56%),' +
+             'radial-gradient(110% 80% at 85% 28%,' + c[1] + ' 0%,rgba(0,0,0,0) 58%),' +
+             'radial-gradient(130% 105% at 68% 96%,' + c[0] + ' 0%,rgba(0,0,0,0) 55%),' +
+             'linear-gradient(178deg,' + c[2] + ' 0%,#05060f 100%)'
+      };
+    }
+    if (d.brand === 'google') {
+      // Pixel: clean dual-tone split
+      return {
+        stops: ['#2e564b', '#16302a'],
+        css: 'linear-gradient(168deg,#22413a 0%,#2e564b 49.8%,#16302a 50.2%,#0d1d19 100%)'
+      };
+    }
+    if (d.bodyStyle === 'budget-android') {
+      // budget: simple two-stop fade
+      return {
+        stops: ['#33486b', '#0d1421'],
+        css: 'linear-gradient(192deg,#33486b 0%,#1d2a44 55%,#0c1220 100%)'
+      };
+    }
+    // Samsung flagship: One-UI-style soft abstract mesh
+    return {
+      stops: ['#3a7bd5', '#7b4ddb', '#c0467f'],
+      css: 'radial-gradient(95% 70% at 20% 16%,rgba(77,130,224,.85) 0%,rgba(0,0,0,0) 60%),' +
+           'radial-gradient(90% 75% at 84% 36%,rgba(132,84,228,.75) 0%,rgba(0,0,0,0) 62%),' +
+           'radial-gradient(110% 90% at 55% 96%,rgba(212,86,150,.65) 0%,rgba(0,0,0,0) 60%),' +
+           'linear-gradient(180deg,#1c2350 0%,#0d1030 100%)'
+    };
   }
 
   /* ---------- status bar --------------------------------------------------- */
@@ -373,6 +435,8 @@
       height: Math.round(d.viewport.height - ins.top - ins.bottom)
     };
     if (el.navbar) el.navbar.hidden = !nav3On();
+    // input interceptor only while a page is actually on screen (chromium)
+    if (el.touchLayer) el.touchLayer.hidden = !(state.app && state.engine === 'chromium');
     document.body.classList.toggle('android-standalone',
       !!(state.standalone && d.os === 'android'));
     applyStatusTheme();
@@ -486,6 +550,48 @@
     pop.innerHTML = html;
   }
 
+  /* ---------- click-catcher (popover modality) -------------------------------
+     Clicks inside the <webview> never bubble to this document, so an
+     "outside click" closer can't see them. Whenever a rail popover is open we
+     show an invisible overlay covering everything below the popovers (incl.
+     the page and the phone): one click on it closes the popovers and is
+     swallowed — nothing behind it can also activate.                         */
+
+  var catcherHeld = false;   // a press started on the catcher is in flight
+
+  function anyPopoverOpen() {
+    return !!((el.devicePopover && !el.devicePopover.hidden) ||
+              (el.settingsPopover && !el.settingsPopover.hidden));
+  }
+
+  function updateCatcher() {
+    if (!el.clickCatcher) return;
+    // keep the catcher up mid-press so the matching mouseup/click can't
+    // fall through to whatever is underneath
+    el.clickCatcher.hidden = !anyPopoverOpen() && !catcherHeld;
+  }
+
+  function wireCatcher() {
+    var c = el.clickCatcher;
+    if (!c) return;
+    c.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      catcherHeld = true;
+      try { c.setPointerCapture(e.pointerId); } catch (err) {}
+      toggleDevicePopover(false);
+      toggleSettingsPopover(false);
+    });
+    function release(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      catcherHeld = false;
+      updateCatcher();
+    }
+    c.addEventListener('pointerup', release);
+    c.addEventListener('pointercancel', release);
+    c.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+  }
+
   function toggleSettingsPopover(show) {
     var pop = el.settingsPopover;
     if (!pop) return;
@@ -495,6 +601,7 @@
       renderSettingsPopover();
       toggleDevicePopover(false);
     }
+    updateCatcher();
   }
 
   function applyDevice(device) {
@@ -558,6 +665,9 @@
       state.standalone = false;
       invoke('standalone:set', { on: false });
     }
+    // the page is leaving the screen — a guest holding focus would keep the
+    // browser-level input capture alive and eat the next shell click
+    try { if (el.page && el.page.blur) el.page.blur(); } catch (e) {}
     if (DP.chrome) DP.chrome.close();
     state.app = null;
     state.themeColor = null;
@@ -590,6 +700,7 @@
 
     wv.addEventListener('dom-ready', function () {
       state.webviewReady = true;
+      injectTapBeacon();
       if (!state.attached) {
         state.attached = true;
         var id = null;
@@ -635,8 +746,314 @@
       if (msg.indexOf('__DEVPHONE_SCROLL__') === 0) {
         var y = parseScrollPayload(msg.slice('__DEVPHONE_SCROLL__'.length));
         if (y != null) bus.emit('scroll', y);
+      } else if (msg === '__DEVPHONE_TAP__') {
+        // a tap happened INSIDE the guest (forwarded, or captured while an
+        // editable held focus) — re-evaluate whether it may keep focus
+        setTimeout(guestBlurUnlessEditing, 90);
       }
     });
+  }
+
+  /* ---------- touch layer: shell-owned page input (chromium engine) ----------
+     WHY: with CDP touch emulation active on the guest, any REAL click routed
+     into the <webview> makes the guest webContents grab browser-level mouse
+     capture + focus. From then on every mouse event in the WINDOW — including
+     clicks on the rail / bars / popovers, and even an "outside click" catcher
+     overlay — is captured straight into the guest, bypassing the shell DOM
+     entirely, until ONE shell-bound click is sacrificed to break the capture.
+     That was the "press twice" bug, and no hover/blur juggling in the shell
+     can see (let alone fix) events it never receives.
+
+     FIX: a transparent #touch-layer covers the webview, so the guest never
+     receives real input. The shell owns every gesture — the same input model
+     the WebKit canvas path already uses:
+       tap   → synthetic pointer/mouse/click sequence dispatched INSIDE the
+               guest (executeJavaScript + elementFromPoint). Forwarded
+               sendInputEvent mouseDown/Up can NOT be used here: the guest's
+               touch emulator turns the down into a touchstart but never
+               terminates the sequence (no touchend, no click), leaving a
+               poisoned input state. The synthetic tap also focuses tapped
+               editables; ONLY then is real guest focus granted (typing
+               needs it) — otherwise the guest stays blurred.
+       drag  → synthetic scroll dispatched INSIDE the guest (executeJavaScript
+               + elementFromPoint + scrollable-ancestor walk + scrollBy),
+               descaled by zoom. Forwarded sendInputEvent mouseWheel is no
+               longer trusted: Electron 36 / Chromium 136 FLIPPED its delta
+               sign convention (E33: DOM-signed, positive deltaY scrolls
+               content down; E36: hardware-signed, NEGATIVE deltaY scrolls
+               down — verified empirically, scratch/probe-gest*.js), which
+               silently inverted every drag/wheel scroll. scrollBy() is
+               DOM-signed by spec and immune to the next flip.
+       wheel → same synthetic scroll (a real phone page never sees wheel
+               events anyway, so nothing of value is lost)
+       hover → forwarded mouseMove (throttled) so :hover / the picker work
+     In MOUSE input mode events are forwarded raw (down/move/up) — without
+     touch emulation there is no capture trap, and text selection just works.
+     sendInputEvent coordinates: Electron ADDS the webview's window offset to
+     whatever we pass (arrival = sent + rect.left/top — verified empirically),
+     so forwarded coords are pre-compensated.                                */
+
+  function guestBlurUnlessEditing() {
+    var wv = el.page;
+    if (!wv) return;
+    var done = false;
+    var doBlur = function () { try { wv.blur(); } catch (e) {} };
+    // fail-safe: if the probe never answers (page tearing down, hung guest)
+    // blur anyway — a focused guest must never linger, it captures all input
+    var failSafe = setTimeout(function () {
+      if (!done) { done = true; doBlur(); }
+    }, 300);
+    var js = '(function(){try{var a=document.activeElement;if(!a)return false;' +
+             'if(a.isContentEditable)return true;var t=a.tagName;' +
+             'return t==="INPUT"||t==="TEXTAREA"||t==="SELECT";}catch(e){return false}})()';
+    try {
+      Promise.resolve(wv.executeJavaScript(js)).then(function (editing) {
+        if (done) return;
+        done = true;
+        clearTimeout(failSafe);
+        if (!editing) doBlur();
+      }).catch(function () {});
+    } catch (e) { /* fail-safe timer covers it */ }
+  }
+
+  // every page load: plant a tiny tap beacon. If the guest ever DOES end up
+  // holding the capture (e.g. a tap while an editable kept it focused), each
+  // captured tap pings us via console-message and we re-evaluate → the shell
+  // heals back to the un-captured state without eating extra clicks.
+  function injectTapBeacon() {
+    var wv = el.page;
+    if (!wv || typeof wv.executeJavaScript !== 'function') return;
+    var js = '(function(){if(window.__dpTapBeacon)return;window.__dpTapBeacon=1;' +
+             'document.addEventListener("pointerdown",function(){' +
+             'try{console.log("__DEVPHONE_TAP__")}catch(e){}},{capture:true,passive:true});})()';
+    try { Promise.resolve(wv.executeJavaScript(js)).catch(function () {}); } catch (e) {}
+  }
+
+  function wireTouchLayer() {
+    var layer = el.touchLayer;
+    if (!layer) return;
+
+    function sendToGuest(ev) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady) return;
+      try { wv.sendInputEvent(ev); } catch (e) {}
+    }
+
+    // guest-LOCAL CSS px of a layer event, pre-compensated for the offset
+    // Electron adds to sendInputEvent coordinates (arrival = sent + rect.xy)
+    function fwdXY(e) {
+      var r = el.page.getBoundingClientRect();
+      var s = (el.page.offsetWidth ? r.width / el.page.offsetWidth : 1) || 1;
+      return {
+        x: Math.round((e.clientX - r.left) / s - r.left),
+        y: Math.round((e.clientY - r.top) / s - r.top)
+      };
+    }
+    // plain guest-local CSS px (for in-guest elementFromPoint)
+    function localXY(e) {
+      var r = el.page.getBoundingClientRect();
+      var s = (el.page.offsetWidth ? r.width / el.page.offsetWidth : 1) || 1;
+      return {
+        x: Math.round((e.clientX - r.left) / s),
+        y: Math.round((e.clientY - r.top) / s)
+      };
+    }
+
+    // tap = full synthetic sequence inside the guest. Returns whether an
+    // editable was tapped; only then the guest gets real focus (typing).
+    function syntheticTap(local) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady || typeof wv.executeJavaScript !== 'function') return;
+      var w = (state.contentViewport && state.contentViewport.width) ||
+              (state.device && state.device.viewport.width) || 0;
+      var js = '(function(x,y,w){try{' +
+        // map widget CSS px → page client px (pages without a mobile
+        // viewport meta lay out wider than the widget, e.g. 980px)
+        'var k=(w&&window.innerWidth)?(window.innerWidth/w):1;' +
+        'x=Math.round(x*k);y=Math.round(y*k);' +
+        'var el=document.elementFromPoint(x,y)||document.body;' +
+        'var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,button:0,pointerId:1,pointerType:"touch",isPrimary:true};' +
+        'try{el.dispatchEvent(new PointerEvent("pointerdown",o))}catch(e){}' +
+        'try{el.dispatchEvent(new MouseEvent("mousedown",o))}catch(e){}' +
+        'var ed=null,n=el;while(n&&n.tagName){var t=n.tagName;' +
+        'if(n.isContentEditable||t==="INPUT"||t==="TEXTAREA"||t==="SELECT"){ed=n;break}n=n.parentElement}' +
+        'if(ed){try{ed.focus()}catch(e){}}' +
+        'try{el.dispatchEvent(new PointerEvent("pointerup",o))}catch(e){}' +
+        'try{el.dispatchEvent(new MouseEvent("mouseup",o))}catch(e){}' +
+        'try{if(typeof el.click==="function")el.click();else el.dispatchEvent(new MouseEvent("click",o))}catch(e){}' +
+        'return ed?"editable":"tapped"}catch(e){return "err"}})(' +
+        local.x + ',' + local.y + ',' + w + ')';
+      try {
+        Promise.resolve(wv.executeJavaScript(js)).then(function (res) {
+          if (res === 'editable') {
+            try { wv.focus(); } catch (e) {}   // real keystrokes → guest
+          } else {
+            try { wv.blur(); } catch (e) {}    // guest must not hold focus
+          }
+        }).catch(function () {});
+      } catch (e) {}
+    }
+
+    // synthetic in-guest scrolling (see the block comment above): find the
+    // element under the point, walk up consuming the delta on scrollable
+    // ancestors, hand any leftover to the window. Coordinates/deltas are
+    // widget CSS px; the guest maps them to page px (k) like syntheticTap.
+    function scrollGuest(local, dx, dy) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady || typeof wv.executeJavaScript !== 'function') return;
+      var w = (state.contentViewport && state.contentViewport.width) ||
+              (state.device && state.device.viewport.width) || 0;
+      var js = '(function(x,y,dx,dy,w){try{' +
+        'var k=(w&&window.innerWidth)?(window.innerWidth/w):1;' +
+        'x=Math.round(x*k);y=Math.round(y*k);dx*=k;dy*=k;' +
+        'var e=document.elementFromPoint(x,y),rx=dx,ry=dy;' +
+        'while(e&&e!==document.body&&e!==document.documentElement&&(Math.abs(rx)>=1||Math.abs(ry)>=1)){' +
+          'var s;try{s=getComputedStyle(e)}catch(_){break}' +
+          'if(ry&&(s.overflowY==="auto"||s.overflowY==="scroll"||s.overflowY==="overlay")&&e.scrollHeight>e.clientHeight){' +
+            'var t=e.scrollTop;e.scrollTop=t+ry;ry-=e.scrollTop-t}' +
+          'if(rx&&(s.overflowX==="auto"||s.overflowX==="scroll"||s.overflowX==="overlay")&&e.scrollWidth>e.clientWidth){' +
+            'var l=e.scrollLeft;e.scrollLeft=l+rx;rx-=e.scrollLeft-l}' +
+          'e=e.parentElement}' +
+        'if(Math.abs(rx)>=1||Math.abs(ry)>=1)window.scrollBy(rx,ry);' +
+        '}catch(_){}})(' + local.x + ',' + local.y + ',' + dx + ',' + dy + ',' + w + ')';
+      try { Promise.resolve(wv.executeJavaScript(js)).catch(function () {}); } catch (e) {}
+    }
+
+    // picker hover (touch mode): Electron 36's touch emulator SWALLOWS
+    // forwarded sendInputEvent mouseMoves — no DOM mousemove ever reaches the
+    // page (verified: scratch/probe-picker-e36.js), so the picker's
+    // DevTools-style highlight box never drew. While the picker is armed,
+    // hover moves are therefore dispatched synthetically INSIDE the guest
+    // (same executeJavaScript + elementFromPoint pattern as syntheticTap),
+    // coalesced to one eval per ~16ms. Mouse input mode keeps raw forwarding
+    // — without touch emulation the forwarded moves still arrive (probe-
+    // verified). Normal forwarding resumes by itself once the picker disarms:
+    // every move re-checks state.pickerOn, which the picker:result listener
+    // (and the rail toggle) reset.
+    function syntheticMove(local) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady || typeof wv.executeJavaScript !== 'function') return;
+      var w = (state.contentViewport && state.contentViewport.width) ||
+              (state.device && state.device.viewport.width) || 0;
+      var js = '(function(x,y,w){try{' +
+        'var k=(w&&window.innerWidth)?(window.innerWidth/w):1;' +
+        'x=Math.round(x*k);y=Math.round(y*k);' +
+        'var el=document.elementFromPoint(x,y)||document.documentElement;' +
+        'var o={bubbles:true,cancelable:true,view:window,clientX:x,clientY:y,button:0,buttons:0};' +
+        'try{el.dispatchEvent(new MouseEvent("mousemove",o))}catch(e){}' +
+        '}catch(e){}})(' + local.x + ',' + local.y + ',' + w + ')';
+      try { Promise.resolve(wv.executeJavaScript(js)).catch(function () {}); } catch (e) {}
+    }
+    var pickerMovePt = null, pickerMoveTimer = null;
+    function queuePickerMove(local) {
+      pickerMovePt = local;
+      if (pickerMoveTimer) return;
+      pickerMoveTimer = setTimeout(function () {
+        pickerMoveTimer = null;
+        var p = pickerMovePt;
+        pickerMovePt = null;
+        if (p && state.pickerOn) syntheticMove(p);
+      }, 16);
+    }
+
+    // coalesce per-pointermove deltas into ~16ms batches (one in-guest eval
+    // per tick instead of one per move; fast flicks stay smooth)
+    var scrollAcc = null, scrollTimer = null;
+    function queueGuestScroll(local, dx, dy) {
+      if (!scrollAcc) scrollAcc = { x: local.x, y: local.y, dx: 0, dy: 0 };
+      scrollAcc.x = local.x;
+      scrollAcc.y = local.y;
+      scrollAcc.dx += dx;
+      scrollAcc.dy += dy;
+      if (!scrollTimer) {
+        scrollTimer = setTimeout(function () {
+          scrollTimer = null;
+          var a = scrollAcc;
+          scrollAcc = null;
+          if (a && (Math.abs(a.dx) >= 0.5 || Math.abs(a.dy) >= 0.5)) {
+            scrollGuest({ x: a.x, y: a.y }, a.dx, a.dy);
+          }
+        }, 16);
+      }
+    }
+
+    var press = null;       // {t, lastX, lastY, mouse} while a button is down
+    var movedPx = 0;
+    var lastHover = 0;
+
+    layer.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || press) return;
+      e.preventDefault();
+      try { layer.setPointerCapture(e.pointerId); } catch (err) {}
+      if (state.inputMode === 'mouse') {
+        press = { mouse: true };
+        var p = fwdXY(e);
+        sendToGuest({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+        return;
+      }
+      press = { t: Date.now(), lastX: e.clientX, lastY: e.clientY };
+      movedPx = 0;
+    });
+
+    layer.addEventListener('pointermove', function (e) {
+      if (!press) {
+        // picker armed under touch emulation: forwarded mouseMoves never
+        // become DOM events in E36 — dispatch the hover inside the guest
+        if (state.pickerOn && state.inputMode !== 'mouse') {
+          queuePickerMove(localXY(e));
+          return;
+        }
+        var now = Date.now();
+        if (now - lastHover < 25) return;
+        lastHover = now;
+        var h = fwdXY(e);
+        sendToGuest({ type: 'mouseMove', x: h.x, y: h.y });
+        return;
+      }
+      if (press.mouse) {
+        var m = fwdXY(e);
+        sendToGuest({ type: 'mouseMove', x: m.x, y: m.y, button: 'left', modifiers: ['leftButtonDown'] });
+        return;
+      }
+      var dx = e.clientX - press.lastX;
+      var dy = e.clientY - press.lastY;
+      press.lastX = e.clientX;
+      press.lastY = e.clientY;
+      movedPx += Math.abs(dx) + Math.abs(dy);
+      if (movedPx > 8 && (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) {
+        var s = state.scale || 1;
+        // drag = scroll, performed synthetically inside the guest; dragging
+        // the finger UP (dy < 0) must scroll the content DOWN → negate.
+        queueGuestScroll(localXY(e), -dx / s, -dy / s);
+      }
+    });
+
+    function endPress(e) {
+      if (!press) return;
+      var wasMouse = press.mouse;
+      var dt = Date.now() - (press.t || 0);
+      var tap = !wasMouse && movedPx < 8 && dt < 700;
+      press = null;
+      if (wasMouse) {
+        var p = fwdXY(e);
+        sendToGuest({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+        return;   // mouse mode: no touch emulation → no capture trap
+      }
+      if (tap) syntheticTap(localXY(e));
+      // scroll gestures need no cleanup: nothing pulled guest focus
+    }
+    layer.addEventListener('pointerup', function (e) {
+      if (e.button !== 0) return;
+      endPress(e);
+    });
+    layer.addEventListener('pointercancel', function (e) { endPress(e); });
+
+    layer.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var s = state.scale || 1;
+      // both sides are DOM-signed → apply 1:1 (descaled by visual zoom)
+      queueGuestScroll(localXY(e), e.deltaX / s, e.deltaY / s);
+    }, { passive: false });
   }
 
   function parseScrollPayload(s) {
@@ -701,12 +1118,34 @@
     var img = new Image();
     var pending = null, drawing = false;
 
+    // The engine streams frames of VARYING sizes (fast CSS-scale frames mixed
+    // with occasional sharp full-DPR ones). The canvas backing store is kept
+    // at a FIXED target size derived from the content viewport — never from
+    // the incoming frame — and every frame is scaled onto it with high-quality
+    // smoothing, so sharp/fast frames can alternate without any flicker.
+    function targetSize() {
+      var cv = state.contentViewport ||
+               (state.device && state.device.viewport) || null;
+      var w = cv ? cv.width : (c.clientWidth || 390);
+      var h = cv ? cv.height : (c.clientHeight || 700);
+      var dpr = Math.max(1, Math.min(3, (state.device && state.device.dpr) || 2));
+      return {
+        w: Math.max(1, Math.round(w * dpr)),
+        h: Math.max(1, Math.round(h * dpr))
+      };
+    }
+
     img.onload = function () {
-      if (c.width !== img.naturalWidth || c.height !== img.naturalHeight) {
-        c.width = img.naturalWidth;
-        c.height = img.naturalHeight;
+      var t = targetSize();
+      if (c.width !== t.w || c.height !== t.h) {  // resize only on layout change
+        c.width = t.w;
+        c.height = t.h;
       }
-      try { ctx.drawImage(img, 0, 0); } catch (e) {}
+      try {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, 0, 0, c.width, c.height);
+      } catch (e) {}
       next();
     };
     img.onerror = next;
@@ -852,32 +1291,37 @@
   /* ---------- device popover ------------------------------------------------ */
 
   // mini phone illustration (~22×38): body in the device accentColor, the
-  // right cutout hint, Samsung wallpaper-gradient screen vs dark iPhone glass
+  // REAL cutout shape, a home-button dot only for classic-button bodies, and
+  // the screen filled with that device's wallpaper colorway — phones are
+  // recognizable at a glance.
   function miniPhoneSvg(d) {
-    var samsung = d.brand === 'samsung' || d.os === 'android';
     var gid = 'mp-' + String(d.id || '').replace(/[^a-z0-9]/gi, '');
-    var none = d.cutout === 'none';
-    var scrY = none ? 5.5 : 3;
-    var scrH = none ? 27 : 32;
+    var classic = d.bodyStyle === 'classic-button';
+    var scrY = classic ? 5.5 : 2.6;
+    var scrH = classic ? 27 : 32.8;
     var rx = Math.max(1.5, Math.min(5, (d.cornerRadius || 0) / 14));
-    var stops = samsung
-      ? '<stop offset="0" stop-color="#3a7bd5"/><stop offset=".55" stop-color="#7b4ddb"/><stop offset="1" stop-color="#c0467f"/>'
-      : '<stop offset="0" stop-color="#2a3354"/><stop offset="1" stop-color="#0b0e1c"/>';
+    var wp = wallpaperFor(d);
+    var stops = wp.stops.map(function (c, i, arr) {
+      var off = arr.length < 2 ? 0 : (i / (arr.length - 1));
+      return '<stop offset="' + off.toFixed(2) + '" stop-color="' + c + '"/>';
+    }).join('');
     var cut = '';
     if (d.cutout === 'dynamic-island') {
-      cut = '<rect x="8" y="5" width="6" height="1.9" rx=".95" fill="#000"/>';
+      cut = '<rect x="8" y="4.2" width="6" height="1.9" rx=".95" fill="#000"/>';
     } else if (d.cutout === 'punch-hole') {
-      cut = '<circle cx="11" cy="5.6" r="1" fill="#000"/>';
+      cut = '<circle cx="11" cy="4.9" r="1" fill="#000"/>';
     } else if (d.cutout === 'notch') {
-      cut = '<rect x="7.5" y="3" width="7" height="2.2" rx="1.1" fill="#000"/>';
-    } else {
-      cut = '<circle cx="11" cy="35" r="1.3" fill="none" stroke="rgba(255,255,255,.4)" stroke-width=".7"/>';
+      cut = (d.os === 'ios')
+        ? '<rect x="7" y="2.6" width="8" height="2.1" rx="1.05" fill="#000"/>'      // wide iPhone notch
+        : '<rect x="9.4" y="2.6" width="3.2" height="2.3" rx="1.15" fill="#000"/>'; // waterdrop
+    }
+    if (classic) {
+      cut += '<circle cx="11" cy="35" r="1.3" fill="none" stroke="rgba(255,255,255,.4)" stroke-width=".7"/>';
     }
     return '<svg class="dev-mini" width="22" height="38" viewBox="0 0 22 38" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
       '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1">' + stops + '</linearGradient></defs>' +
       '<rect x=".75" y=".75" width="20.5" height="36.5" rx="' + (rx + 2) + '" fill="' + esc(d.accentColor || '#2c2c2e') + '" stroke="rgba(255,255,255,.28)" stroke-width=".8"/>' +
-      '<rect x="2.5" y="' + scrY + '" width="17" height="' + scrH + '" rx="' + rx + '" fill="url(#' + gid + ')"' +
-        (samsung ? ' opacity=".85"' : '') + '/>' +
+      '<rect x="2.5" y="' + scrY + '" width="17" height="' + scrH + '" rx="' + rx + '" fill="url(#' + gid + ')"/>' +
       cut +
       '</svg>';
   }
@@ -947,6 +1391,7 @@
       renderDevicePopover();
       if (el.settingsPopover) el.settingsPopover.hidden = true;
     }
+    updateCatcher();
   }
 
   /* ---------- control rail --------------------------------------------------- */
@@ -1071,6 +1516,57 @@
 
   /* ---------- focus fixes ("press twice" killers) ------------------------------ */
 
+  function isTextualInput(t) {
+    if (!t || t.tagName !== 'INPUT') return false;
+    var ty = (t.getAttribute('type') || 'text').toLowerCase();
+    return ty === 'text' || ty === 'search' || ty === 'url';
+  }
+
+  // approximate caret index for a click at clientX inside a text input.
+  // Needed because the shell's input arrives with TOUCH-tap semantics (the
+  // guest touch emulation hooks the whole window): a tap on selected text
+  // KEEPS the selection instead of collapsing it, so we place the caret
+  // ourselves. Handles text-align + padding + scroll + visual zoom.
+  var caretCanvas = null;
+  function caretIndexFromPoint(input, clientX) {
+    var v = input.value || '';
+    if (!v) return 0;
+    try {
+      var rect = input.getBoundingClientRect();
+      var cs = getComputedStyle(input);
+      if (!caretCanvas) caretCanvas = document.createElement('canvas');
+      var ctx = caretCanvas.getContext('2d');
+      ctx.font = (cs.fontWeight || '400') + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+      var visScale = (input.offsetWidth ? rect.width / input.offsetWidth : 1) || 1;
+      var padL = parseFloat(cs.paddingLeft) || 0;
+      var padR = parseFloat(cs.paddingRight) || 0;
+      var inner = input.clientWidth - padL - padR;
+      var textW = ctx.measureText(v).width;
+      var startX;
+      if (cs.textAlign === 'center') startX = padL + Math.max(0, (inner - textW) / 2);
+      else if (cs.textAlign === 'right' || cs.textAlign === 'end') startX = padL + Math.max(0, inner - textW);
+      else startX = padL;
+      var x = (clientX - rect.left) / visScale - startX + (input.scrollLeft || 0);
+      if (x <= 0) return 0;
+      if (x >= textW) return v.length;
+      for (var i = 1; i <= v.length; i++) {
+        var w = ctx.measureText(v.slice(0, i)).width;
+        if (w >= x) {
+          var prev = ctx.measureText(v.slice(0, i - 1)).width;
+          return (x - prev < w - x) ? i - 1 : i;
+        }
+      }
+      return v.length;
+    } catch (e) { return v.length; }
+  }
+
+  // INTENTIONALLY NOT focusing the guest. Any programmatic webview.focus()
+  // (and any real click routed into the guest) arms the touch-emulation
+  // mouse-capture trap that eats the next shell-bound click — see the
+  // touch-layer block above wireWebview for the full story. The guest only
+  // gains focus through a forwarded tap, and only KEEPS it while an editable
+  // element is focused in the page.
+
   function wireFocusFixes() {
     // 1a) focus-follows-mouse: by the time the user clicks, the OS window is
     //     active, so the first click lands.
@@ -1085,47 +1581,50 @@
       activateIfNeeded();
     }, { passive: true });
 
-    // 1b) guest/shell focus juggling
-    function focusGuest() {
-      var ae = document.activeElement;
-      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return; // don't steal from shell inputs
-      if (!state.webviewReady || !state.app || state.engine !== 'chromium') return;
-      var wv = el.page;
-      if (wv && typeof wv.focus === 'function') {
-        try { wv.focus(); } catch (e) {}
-      }
-    }
-    function blurGuest() {
-      var ae = document.activeElement;
-      if (ae && ae === el.page && typeof ae.blur === 'function') {
-        try { ae.blur(); } catch (e) {}
-      }
-    }
-    // entering the screen / webview area → page owns the keyboard
-    if (el.screen) el.screen.addEventListener('mouseenter', function () { activateIfNeeded(); focusGuest(); });
-    if (el.page && typeof el.page.addEventListener === 'function') {
-      el.page.addEventListener('mouseenter', function () { activateIfNeeded(); focusGuest(); });
-    }
-    // entering shell chrome / popovers / bars → shell owns the first click.
-    // (mouseover bubbles, so this also works for #browser-chrome, whose root
-    // is pointer-events:none with interactive children)
-    [el.sidebarControls, el.devicePopover, el.settingsPopover, el.browserChrome,
-     el.sheetLayer, el.navbar, el.homescreen].forEach(function (n) {
-      if (!n) return;
-      n.addEventListener('mouseover', function () { activateIfNeeded(); blurGuest(); });
-    });
+    // 1b) guest focus is managed by the touch-layer (see wireTouchLayer) —
+    //     no mouseenter/mouseover focus juggling here. The old hover-based
+    //     juggling could never work: while the guest held the capture, the
+    //     shell received NO mouse events at all, so hover handlers were
+    //     blind exactly when they were needed.
 
-    // 1c) shell text inputs select-all on focus (and survive the mouseup that
-    //     would normally collapse the selection)
+    // 1c) shell text inputs: FIRST click into an unfocused input selects all
+    //     (mouseup suppressed so the selection survives); a SECOND single
+    //     click places the caret normally — inline editing without a
+    //     double-click. The suppressor is armed ONLY when the press that is
+    //     currently in flight is the one giving the input focus; programmatic
+    //     focus (e.g. the URL pill building its input on click) never arms
+    //     it, so it can't eat a later caret-placing click.
+    var selectAllArmed = false;
+    var pendingCaret = null;
+    document.addEventListener('pointerdown', function (e) {
+      var t = e.target;
+      var focusing = isTextualInput(t) && document.activeElement !== t;
+      selectAllArmed = !!focusing;
+      // SECOND single click on an already-focused input: under the emulated
+      // touch semantics a tap on selected text KEEPS the selection, so we
+      // collapse it to a caret at the tapped character ourselves — applied
+      // on the tap's final 'click' event (after all browser handling).
+      pendingCaret = (!focusing && isTextualInput(t))
+        ? { t: t, idx: caretIndexFromPoint(t, e.clientX) }
+        : null;
+    }, true);
+    document.addEventListener('click', function (e) {
+      if (!pendingCaret) return;
+      var pc = pendingCaret;
+      pendingCaret = null;
+      if (e.target !== pc.t || document.activeElement !== pc.t) return;
+      try { pc.t.setSelectionRange(pc.idx, pc.idx); } catch (err) {}
+    }, true);
     document.addEventListener('focusin', function (e) {
       var t = e.target;
-      if (!t || t.tagName !== 'INPUT') return;
-      var ty = (t.getAttribute('type') || 'text').toLowerCase();
-      if (ty !== 'text' && ty !== 'search' && ty !== 'url') return;
+      if (!isTextualInput(t)) return;
       try { t.select(); } catch (err) {}
-      var keepSel = function (ev) { ev.preventDefault(); t.removeEventListener('mouseup', keepSel); };
-      t.addEventListener('mouseup', keepSel);
     });
+    document.addEventListener('mouseup', function (e) {
+      if (!selectAllArmed) return;
+      selectAllArmed = false;
+      if (isTextualInput(e.target)) e.preventDefault();  // keep the select-all
+    }, true);
   }
 
   /* ---------- boot ------------------------------------------------------------ */
@@ -1133,7 +1632,9 @@
   function init() {
     cacheEls();
     wireRail();
+    wireCatcher();
     wireWebview();
+    wireTouchLayer();
     wireCanvas();
     wireGesture();
     wireEngineEvents();
@@ -1213,6 +1714,7 @@
     navigate: navigate,
     navAction: navAction,
     goHome: goHome,
+    wallpaper: wallpaperFor,
     applyStatusTheme: applyStatusTheme,
     updateHomeIndicator: updateHomeIndicator,
     layoutContent: layoutContent,

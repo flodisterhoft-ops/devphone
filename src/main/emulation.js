@@ -174,11 +174,67 @@ async function injectCfg(wc) {
 }
 
 function computeInsets(device) {
-  if (!device || device.cutout === 'none') return { top: 0, bottom: 0, left: 0, right: 0 };
+  if (!device) return { top: 0, bottom: 0, left: 0, right: 0 };
   if (device.os === 'ios') {
-    return { top: device.cutout === 'dynamic-island' ? 59 : 47, bottom: 34, left: 0, right: 0 };
+    if (device.cutout === 'dynamic-island') return { top: 59, bottom: 34, left: 0, right: 0 };
+    if (device.cutout === 'notch') return { top: 47, bottom: 34, left: 0, right: 0 };
+    return { top: 20, bottom: 0, left: 0, right: 0 }; // classic button (status bar only)
   }
-  return { top: 24, bottom: 24, left: 0, right: 0 }; // android + gesture bar
+  // Android: 0 — the renderer lays the page out below the status bar, so the
+  // page never sits under a cutout (gesture bar handled by renderer layout).
+  return { top: 0, bottom: 0, left: 0, right: 0 };
+}
+
+// v0.1.2: ALL safe-area-inset logic lives here. Values (CSS px):
+//   iOS dynamic-island  top 59 / bottom 34
+//   iOS notch           top 47 / bottom 34
+//   iOS classic button  top 20 / bottom 0
+//   android             top 0  / bottom 0   (renderer layout handles bars)
+// standalone keeps the SAME insets (the page is edge-to-edge under the same
+// hardware cutouts either way) — the parameter exists so standalone:set can
+// re-apply and so future modes may differ.
+//
+// VERDICT (measured, scratch/test-safearea.js): Emulation.setSafeAreaInsetsOverride
+// does NOT exist in Chromium 130 (Electron 33) — "method wasn't found" — and no
+// setDeviceMetricsOverride variant plumbs env(safe-area-inset-*). The command
+// first ships in Chromium 136 → Electron 36+. This function stays a safe no-op
+// until then; the nested {insets:{top,topMax,...}} shape below matches the
+// Chromium 136 protocol definition.
+let safeAreaSupported = null; // null = not probed yet, then true/false
+
+async function applySafeArea(wc, device, standalone) {
+  if (!wc || wc.isDestroyed()) return { ok: false, error: 'webContents destroyed' };
+  void standalone; // same insets in standalone — see note above
+  const ins = computeInsets(device);
+  const insets = {
+    top: ins.top, topMax: ins.top,
+    bottom: ins.bottom, bottomMax: ins.bottom,
+    left: ins.left, leftMax: ins.left,
+    right: ins.right, rightMax: ins.right,
+  };
+  try {
+    if (!wc.debugger.isAttached()) wc.debugger.attach('1.3');
+  } catch (e) { /* already attached */ }
+  try {
+    // Chromium ≥136 shape: { insets: SafeAreaInsets }
+    await wc.debugger.sendCommand('Emulation.setSafeAreaInsetsOverride', { insets: insets });
+    safeAreaSupported = true;
+    return { ok: true, applied: true, insets: ins };
+  } catch (e) {
+    try {
+      // defensive: flat shape, in case an intermediate build differed
+      await wc.debugger.sendCommand('Emulation.setSafeAreaInsetsOverride', insets);
+      safeAreaSupported = true;
+      return { ok: true, applied: true, insets: ins };
+    } catch (e2) {
+      if (safeAreaSupported === null) {
+        console.warn('[emulation] Emulation.setSafeAreaInsetsOverride unavailable in Chromium ' +
+          process.versions.chrome + ' — needs Chromium >=136 (Electron >=36); env(safe-area-inset-*) stays 0.');
+      }
+      safeAreaSupported = false;
+      return { ok: true, applied: false };
+    }
+  }
 }
 
 async function applyDevice(wc, device, options) {
@@ -266,10 +322,8 @@ async function applyDevice(wc, device, options) {
     }
   }
 
-  // Safe areas — newer CDP only; both parameter shapes attempted, no-op on failure.
-  const insets = computeInsets(device);
-  const insetRes = await cdp('Emulation.setSafeAreaInsetsOverride', { insets: insets });
-  if (insetRes === null) await cdp('Emulation.setSafeAreaInsetsOverride', insets);
+  // Safe areas — single source of truth; no-op until Chromium ≥136 (see applySafeArea).
+  await applySafeArea(wc, device, standalone);
 
   await cdp('Emulation.setEmulatedMedia', {
     features: [{ name: 'display-mode', value: standalone ? 'standalone' : 'browser' }],
@@ -318,6 +372,11 @@ async function setStandalone(wc, on) {
         features: [{ name: 'display-mode', value: on ? 'standalone' : 'browser' }],
       });
     } catch (e) {}
+    // Re-apply safe-area insets (same values in standalone) — keeps the
+    // override alive across display-mode flips once the CDP command exists.
+    if (ctx.state && ctx.state.device) {
+      await applySafeArea(wc, ctx.state.device, !!on);
+    }
     await injectCfg(wc); // refresh window.__DEVPHONE_STANDALONE__ live
     return { ok: true, standalone: !!on };
   } catch (e) {
@@ -389,6 +448,7 @@ module.exports = {
   init,
   attachScreen,
   applyDevice,
+  applySafeArea,
   injectCfg,
   setStandalone,
   setInputMode,

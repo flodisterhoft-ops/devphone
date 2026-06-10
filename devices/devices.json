@@ -7,9 +7,15 @@
       "brand": "apple",
       "os": "ios",
       "osVersion": "26",
-      "viewport": { "width": 440, "height": 956 },
+      "viewport": {
+        "width": 440,
+        "height": 956
+      },
       "dpr": 3,
-      "physical": { "width": 1320, "height": 2868 },
+      "physical": {
+        "width": 1320,
+        "height": 2868
+      },
       "diagonalInches": 6.9,
       "cutout": "dynamic-island",
       "cornerRadius": 55,
@@ -17,7 +23,10 @@
       "accentColor": "#3b3b3d",
       "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
       "uaModel": "",
-      "browsers": ["safari", "chrome"],
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
       "estimated": false,
       "releaseYear": 2024
     },
@@ -27,17 +36,26 @@
       "brand": "apple",
       "os": "ios",
       "osVersion": "26",
-      "viewport": { "width": 375, "height": 667 },
+      "viewport": {
+        "width": 375,
+        "height": 667
+      },
       "dpr": 2,
-      "physical": { "width": 750, "height": 1334 },
+      "physical": {
+        "width": 750,
+        "height": 1334
+      },
       "diagonalInches": 4.7,
       "cutout": "none",
       "cornerRadius": 0,
-      "bodyStyle": "aluminum",
+      "bodyStyle": "classic-button",
       "accentColor": "#1f1f21",
       "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
       "uaModel": "",
-      "browsers": ["safari", "chrome"],
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
       "estimated": false,
       "releaseYear": 2022
     },
@@ -47,9 +65,15 @@
       "brand": "samsung",
       "os": "android",
       "osVersion": "16",
-      "viewport": { "width": 384, "height": 832 },
+      "viewport": {
+        "width": 384,
+        "height": 832
+      },
       "dpr": 3.75,
-      "physical": { "width": 1440, "height": 3120 },
+      "physical": {
+        "width": 1440,
+        "height": 3120
+      },
       "diagonalInches": 6.9,
       "cutout": "punch-hole",
       "cornerRadius": 34,
@@ -57,7 +81,10 @@
       "accentColor": "#2c2c2e",
       "ua": "Mozilla/5.0 (Linux; Android 16; SM-S938B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
       "uaModel": "SM-S938B",
-      "browsers": ["chrome", "samsung"],
+      "browsers": [
+        "chrome",
+        "samsung"
+      ],
       "estimated": false,
       "releaseYear": 2025
     },
@@ -67,9 +94,15 @@
       "brand": "samsung",
       "os": "android",
       "osVersion": "15",
-      "viewport": { "width": 360, "height": 800 },
+      "viewport": {
+        "width": 360,
+        "height": 800
+      },
       "dpr": 3,
-      "physical": { "width": 1080, "height": 2340 },
+      "physical": {
+        "width": 1080,
+        "height": 2340
+      },
       "diagonalInches": 6.7,
       "cutout": "notch",
       "cornerRadius": 18,
@@ -77,7 +110,10 @@
       "accentColor": "#23252b",
       "ua": "Mozilla/5.0 (Linux; Android 15; SM-A165F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
       "uaModel": "SM-A165F",
-      "browsers": ["chrome", "samsung"],
+      "browsers": [
+        "chrome",
+        "samsung"
+      ],
       "estimated": false,
       "releaseYear": 2024
     }

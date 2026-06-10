@@ -318,6 +318,12 @@
     if (!device || !root) return;
     editing = false;
     root.innerHTML = device.os === 'ios' ? renderIOS(device) : renderAndroid(device);
+    // per-device wallpaper colorway (brand + generation); the .hs-ios /
+    // .hs-android CSS backgrounds remain as a fallback
+    var hs = root.querySelector('.hs');
+    if (hs && typeof DP.wallpaper === 'function') {
+      try { hs.style.background = DP.wallpaper(device).css; } catch (e) {}
+    }
     wire(root);
   }
 

@@ -339,3 +339,70 @@ the top edge. Tracking is rAF-throttled `elementFromPoint` with the overlay
 hidden during the probe. Click selects (capture phase, preventDefault +
 stopPropagation), emits the report, then disarms and removes overlay +
 cursor style. Escape disarms.
+
+## v0.1.2 extensions (ENGINE)
+
+### WebKit adaptive frame streaming
+
+`webkit:frame` payload extended (backward compatible — old `{dataUrl}`
+consumers keep working): `{dataUrl, w?, h?, sharp?}`. `w`/`h` are the CSS-px
+viewport size the frame represents; the IMAGE may be larger (full-DPR) —
+the renderer must scale whatever it gets to the canvas, keyed on the
+image's natural size, never assume frame px == canvas px.
+
+Streaming behavior (replaces the fixed ~8fps interval loop):
+- Self-scheduling capture loop: next capture starts when the previous
+  completes + ~25ms breather. css-scale JPEG quality 75.
+- Frames identical to the previous capture (base64 equality) are NOT sent —
+  a static page goes quiet instead of re-sending ~8 identical frames/s.
+- SHARPNESS: after ~600ms with no forwarded input, no navigation and no
+  content change, ONE full-DPR frame (`scale:'device'`, JPEG q90) is sent
+  with `sharp:true` (e.g. 1320×2868 for iPhone 16 Pro Max while `w:440
+  h:956`). Any input / navigation / content change resumes the fast css
+  loop and re-arms the next sharp frame. Page animations never flicker
+  between sharp and css frames: content changes count as activity.
+- Frames are only emitted while the shell window is visible and not
+  minimized; the loop exits cleanly on engine switch (generation counter).
+
+### Safe-area insets — single source of truth + VERDICT
+
+`emulation.applySafeArea(wc, device, standalone)` owns ALL inset logic and
+is called on screen:attach, device:set re-applies, and standalone:set
+(standalone keeps the same insets). Values (CSS px):
+
+| device | top | bottom |
+|---|---|---|
+| iOS dynamic-island | 59 | 34 |
+| iOS notch | 47 | 34 |
+| iOS classic button (`cutout:none`) | 20 | 0 |
+| android (any) | 0 | 0 — status/gesture bars handled by renderer layout |
+
+**Measured verdict (scratch/test-safearea.js, Electron 33.4.11 / Chromium
+130.0.6723.191):** `Emulation.setSafeAreaInsetsOverride` does NOT exist
+("method wasn't found"), and no `Emulation.setDeviceMetricsOverride`
+variant (screenOrientation/viewport/displayFeature/extra-param probes)
+plumbs `env(safe-area-inset-*)` — it stays `0px` under every attempt, with
+and without reload. The command first ships in **Chromium 136** (verified
+against release-tag pdls: absent in 135.0.7049.41, present in
+136.0.7103.48), i.e. **Electron ≥36** is required. Until the integrator
+bumps Electron, `applySafeArea` is a warn-once no-op and pages see inset 0
+— the renderer's content-viewport layout (v0.1.1) is the only protection
+against content under the Dynamic Island. The implemented call shape
+matches the Chromium 136 protocol: `{insets:{top,topMax,left,leftMax,
+bottom,bottomMax,right,rightMax}}` (all integers; *Max set equal to base).
+
+### Parallel-safe test plumbing
+
+`DEVPHONE_USERDATA` env var: when set, main.js calls
+`app.setPath('userData', …)` before app ready — each Playwright-Electron
+test instance gets its own profile (and thus its own single-instance lock).
+Takes precedence over the `--selftest` tmp-profile isolation.
+
+### Selftest fix (webkit engine)
+
+With `--st-engine=webkit` the renderer hides the `<webview>`, and
+`capturePage()` on a hidden webContents never resolves — the selftest used
+to hang until the watchdog. `selftest-screen.png` now comes from
+`webkit.captureFull()` (device-scale PNG) when engineMode is webkit; the
+chromium path is bounded by a 10s race. Step timings are logged as
+`SELFTEST TIMING …`.

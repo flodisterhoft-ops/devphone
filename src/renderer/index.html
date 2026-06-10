@@ -37,6 +37,11 @@
             })();
           </script>
           <canvas id="webkit-canvas" tabindex="0"></canvas>
+          <!-- input interceptor over the webview (chromium engine): the shell
+               owns ALL pointer input and forwards it via sendInputEvent, so
+               the guest never grabs browser-level mouse capture/focus (which
+               used to EAT the first click on the rail/bars after page use) -->
+          <div id="touch-layer" hidden></div>
           <div id="homescreen"></div>
           <div id="startpage" hidden></div>
           <div id="browser-chrome" hidden></div>
@@ -71,6 +76,10 @@
       <button id="btn-settings" class="rail-btn" title="Settings">⚙️<span>Settings</span></button>
     </aside>
 
+    <!-- invisible modality overlay: shown while a rail popover is open; one
+         click closes the popover and is swallowed (covers the webview too,
+         whose clicks never bubble to this document) -->
+    <div id="click-catcher" hidden></div>
     <div id="device-popover" hidden></div>
     <div id="settings-popover" hidden></div>
   </div>

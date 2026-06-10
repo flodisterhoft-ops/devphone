@@ -175,6 +175,7 @@
     chromeRoot().innerHTML =
       '<div class="bc bc-chrome' + (bottom ? ' addr-bottom' : '') + '">' +
         (bottom ? '<div class="chr-statusfill"></div>' : '') +
+        '<div class="menu-catcher" hidden></div>' +
         '<div class="chr-bar">' +
           '<div class="chr-field" id="chr-field">' +
             svgLock(12) +
@@ -205,8 +206,9 @@
     // menu opens on MOUSEDOWN so the first press lands even mid focus-juggle
     $('chr-menu').addEventListener('mousedown', function (e) {
       e.stopPropagation();
-      $('chr-menu-pop').hidden = !$('chr-menu-pop').hidden;
+      setMenuOpen($('chr-menu-pop'), $('chr-menu-pop').hidden);
     });
+    wireMenuCatcher();
     $('chr-back').addEventListener('click', function () { hideMenus(); DP.navAction('back'); });
     $('chr-fwd').addEventListener('click', function () { hideMenus(); DP.navAction('forward'); });
     $('chr-reload2').addEventListener('click', function () { hideMenus(); DP.navAction('reload'); });
@@ -231,6 +233,7 @@
   function renderSamsung() {
     chromeRoot().innerHTML =
       '<div class="bc bc-samsung">' +
+        '<div class="menu-catcher" hidden></div>' +
         '<div class="sam-top">' +
           '<div class="sam-field" id="sam-field">' +
             svgLock(12) +
@@ -261,8 +264,9 @@
     // menu opens on MOUSEDOWN — first press lands
     $('sam-menu').addEventListener('mousedown', function (e) {
       e.stopPropagation();
-      $('sam-menu-pop').hidden = !$('sam-menu-pop').hidden;
+      setMenuOpen($('sam-menu-pop'), $('sam-menu-pop').hidden);
     });
+    wireMenuCatcher();
     $('sam-a2hs').addEventListener('click', function () { hideMenus(); beginAddToHome('samsung'); });
     $('sam-copy').addEventListener('click', function () { hideMenus(); copyLink(); });
     $('sam-ext').addEventListener('click', function () {
@@ -271,14 +275,59 @@
     });
   }
 
+  function menuCatcher() {
+    var root = chromeRoot();
+    return root ? root.querySelector('.menu-catcher') : null;
+  }
+
+  // toggle a ⋮/⋯ menu together with its in-screen click-catcher. The catcher
+  // covers the page + bars below the open menu, so ONE tap anywhere outside
+  // the menu closes it AND is swallowed — clicks in the webview don't bubble
+  // to this document, the catcher is what makes outside-tap-to-close work.
+  function setMenuOpen(popEl, open) {
+    if (!popEl) return;
+    popEl.hidden = !open;
+    var cat = menuCatcher();
+    if (cat) cat.hidden = !open;
+  }
+
   function hideMenus() {
     ['chr-menu-pop', 'sam-menu-pop'].forEach(function (id) {
       var n = $(id);
       if (n) n.hidden = true;
     });
+    var cat = menuCatcher();
+    if (cat) cat.hidden = true;
   }
-  // close on the FIRST press anywhere else (mousedown, not click)
+
+  function wireMenuCatcher() {
+    var cat = menuCatcher();
+    if (!cat) return;
+    cat.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try { cat.setPointerCapture(e.pointerId); } catch (err) {}
+      // close the menus but keep the catcher up until the press completes so
+      // the matching mouseup/click can't fall through to what's underneath
+      ['chr-menu-pop', 'sam-menu-pop'].forEach(function (id) {
+        var n = $(id);
+        if (n) n.hidden = true;
+      });
+    });
+    function release(e) {
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      cat.hidden = true;
+    }
+    cat.addEventListener('pointerup', release);
+    cat.addEventListener('pointercancel', release);
+    cat.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+  }
+
+  // close on the FIRST press anywhere else (mousedown, not click).
+  // .menu-catcher presses manage themselves (they must NOT hide the catcher
+  // before the press completes).
   document.addEventListener('mousedown', function (e) {
+    if (e.target.closest('.menu-catcher')) return;
     if (!e.target.closest('.menu-pop') && !e.target.closest('#chr-menu') && !e.target.closest('#sam-menu')) hideMenus();
   });
 

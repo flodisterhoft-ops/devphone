@@ -29,6 +29,12 @@ body {
 
 button { font-family: inherit; cursor: pointer; }
 input { font-family: inherit; }
+/* the shell disables selection globally — text inputs must opt back in or
+   mouse clicks can't place a caret (second-click inline editing) */
+input[type="text"], input[type="search"], input[type="url"], input:not([type]) {
+  user-select: text;
+  -webkit-user-select: text;
+}
 
 /* ---------- stage layout ------------------------------------------------ */
 
@@ -47,6 +53,10 @@ input { font-family: inherit; }
 
 #sidebar-controls {
   flex: none;
+  /* above #click-catcher (200) so the rail stays one-click-able while a
+     popover is open; below the popovers themselves (300) */
+  position: relative;
+  z-index: 250;
   width: var(--rail-w);
   align-self: center;
   max-height: calc(100vh - 40px);
@@ -118,6 +128,20 @@ input { font-family: inherit; }
   box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
 }
 .rail-btn.active span { color: #9fcdff; }
+
+/* ---------- click-catcher (popover modality) ------------------------------ */
+/* Invisible overlay over the whole window (incl. the webview, whose clicks
+   never reach this document) while a rail popover is open. Sits below the
+   popovers (300) and the rail (250), above everything else.                */
+
+#click-catcher {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: transparent;
+  -webkit-app-region: no-drag;
+}
+#click-catcher[hidden] { display: none; }
 
 /* ---------- device popover ---------------------------------------------- */
 
@@ -285,6 +309,24 @@ input { font-family: inherit; }
 body.engine-webkit #page { visibility: hidden; }
 body.engine-webkit #webkit-canvas { display: block; }
 
+/* input interceptor over the webview (chromium mode, app open). Same content
+   box as #page; sits under the home screen / bars / sheets, so it only
+   receives input destined for the page itself. */
+#touch-layer {
+  position: absolute;
+  left: 0;
+  top: var(--content-top, 0px);
+  width: 100%;
+  height: var(--content-h, 100%);
+  z-index: 5;
+  background: transparent;
+  touch-action: none; /* pointermove streams must reach the gesture code */
+  transition: top 0.22s ease, height 0.22s ease;
+}
+#touch-layer[hidden] { display: none; }
+body.engine-webkit #touch-layer { display: none; }
+#screen.no-anim #touch-layer { transition: none; }
+
 /* no resize animation during device swaps */
 #screen.no-anim #page, #screen.no-anim #webkit-canvas { transition: none; }
 
@@ -306,7 +348,16 @@ body.picker-on #screen, body.picker-on #screen * { cursor: default !important; }
 #browser-chrome { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
 #browser-chrome[hidden] { display: none; }
 #browser-chrome > * { pointer-events: auto; }
-#sheet-layer { position: absolute; inset: 0; z-index: 40; }
+/* Sheets sit ABOVE the status bar / home-indicator / #home-gesture band
+   (z 50-53): the scrim dims them like real iOS, and — critically — the
+   invisible swipe-home band can never steal clicks from the bottom of a
+   sheet (e.g. the share sheet's Cancel button). Chromium 136 re-hit-tests
+   a tap's synthesized compat mouse events at the RAW point instead of
+   reusing the touch-adjusted pointer target, so an overlapping higher-z
+   band now eats the click/mousedown even when pointerdown/up landed on
+   the button. Kept below #navbar (55): Android dialogs don't dim the
+   3-button bar. */
+#sheet-layer { position: absolute; inset: 0; z-index: 54; }
 #sheet-layer[hidden] { display: none; }
 
 #statusbar {
@@ -744,6 +795,17 @@ body.android-standalone #statusbar .sb-android {
   height: var(--sb-h, 32px);
   background: #fff;
 }
+
+/* in-screen click-catcher: shown while a browser menu (⋮/⋯) is open; covers
+   the page + bars below the menu so one tap anywhere closes the menu and is
+   swallowed (webview clicks don't bubble to this document) */
+.menu-catcher {
+  position: absolute;
+  inset: 0;
+  z-index: 5;            /* under .menu-pop (6), over bars/page */
+  background: transparent;
+}
+.menu-catcher[hidden] { display: none; }
 
 .menu-pop {
   position: absolute;

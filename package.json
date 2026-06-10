@@ -13,7 +13,7 @@
     "dist": "electron-builder --win nsis portable"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
+    "electron": "^36.9.5",
     "electron-builder": "^25.1.8"
   },
   "dependencies": {

@@ -5,12 +5,27 @@
  *
  * Lazy-launched on first engine:set webkit (playwright required lazily so
  * PLAYWRIGHT_BROWSERS_PATH — set in main.js — is always in effect first).
- * One context per device; ~8 fps JPEG screenshot loop with an in-flight
- * guard, frames pushed to the shell renderer as 'webkit:frame'.
- * Input forwarding (tap/down/move/up/wheel/key/type), picker via
- * page.evaluate of src/inject/picker.js + console listener, page:meta on
- * navigation. Graceful degrade: every entry point returns {ok:false,error}
- * instead of throwing; nothing here may crash the app.
+ * One context per device; frames pushed to the shell renderer as
+ * 'webkit:frame' {dataUrl, w, h, sharp?}.
+ *
+ * Adaptive streaming (v0.1.2):
+ * - Self-scheduling capture loop: the next capture starts when the previous
+ *   completes + a ~25ms breather (no fixed interval; throughput-bound).
+ * - css-scale JPEG quality 75 while anything is moving; frames identical to
+ *   the previous capture (base64 equality) are NOT sent.
+ * - After ~600ms with no forwarded input, no navigation and no content
+ *   change, ONE full-DPR frame (scale:'device', JPEG q90) is emitted with
+ *   {sharp:true} so text is crisp while the user reads. The fast css loop
+ *   resumes on the next input/navigation/content change.
+ * - Frames are only emitted while the shell window is visible (not
+ *   minimized/hidden); the loop stops cleanly on engine switch.
+ *
+ * Input forwarding (tap/down/move/up/wheel/key/type) — coordinates arrive
+ * in CONTENT-viewport CSS px (v0.1.1) and the Playwright context viewport
+ * is created from the same content-viewport override, so they map 1:1.
+ * Picker via page.evaluate of src/inject/picker.js + console listener,
+ * page:meta on navigation. Graceful degrade: every entry point returns
+ * {ok:false,error} instead of throwing; nothing here may crash the app.
  */
 
 const { clipboard } = require('electron');
@@ -27,16 +42,45 @@ const wk = {
   context: null,
   page: null,
   device: null,
+  viewport: null, // {width,height} the context was created with (CSS px)
   active: false,
-  timer: null,
-  inFlight: false,
+  loopGen: 0, // generation counter — bumping it terminates a running loop
   lastFrame: null, // Buffer (jpeg) of the most recent frame
+  lastB64: null, // base64 of the last css-scale capture (skip-identical)
+  lastActivity: 0, // ts of last input / navigation / content change
+  sharpSent: false, // one sharp frame per idle period
   histIndex: 0,
   histLength: 1,
   standalone: false,
 };
 
-const FRAME_INTERVAL_MS = 125; // ~8 fps
+const FRAME_BREATHER_MS = 25; // pause between a finished capture and the next
+const FRAME_QUALITY = 75; // css-scale streaming jpeg quality
+const SHARP_IDLE_MS = 600; // quiet time before the one crisp full-DPR frame
+const SHARP_QUALITY = 90; // full-DPR jpeg quality
+const HIDDEN_POLL_MS = 250; // re-check cadence while the shell is hidden
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Any user intent or page motion: defers the sharp frame and re-arms it.
+function bumpActivity() {
+  wk.lastActivity = Date.now();
+  wk.sharpSent = false;
+}
+
+// Emit only while the shell window can actually be seen. No window (module
+// harnesses) counts as visible so streaming still works headless.
+function shellVisible() {
+  try {
+    const win = ctx.state && ctx.state.shellWindow;
+    if (!win || win.isDestroyed()) return true;
+    return win.isVisible() && !win.isMinimized();
+  } catch (e) {
+    return true;
+  }
+}
 
 const SCROLL_REPORTER =
   "(function(){try{if(window.__DEVPHONE_SCROLL_INSTALLED__)return;" +
@@ -97,11 +141,12 @@ async function start(options) {
 
     await closeContext();
 
+    const vp = {
+      width: (vpo && vpo.width) || (device.viewport && device.viewport.width) || 390,
+      height: (vpo && vpo.height) || (device.viewport && device.viewport.height) || 844,
+    };
     wk.context = await wk.browser.newContext({
-      viewport: {
-        width: (vpo && vpo.width) || (device.viewport && device.viewport.width) || 390,
-        height: (vpo && vpo.height) || (device.viewport && device.viewport.height) || 844,
-      },
+      viewport: vp,
       deviceScaleFactor: device.dpr || 2,
       isMobile: true,
       hasTouch: true,
@@ -111,6 +156,7 @@ async function start(options) {
 
     wk.page = await wk.context.newPage();
     wk.device = device;
+    wk.viewport = vp;
     wk.standalone = standalone;
     wk.histIndex = 0;
     wk.histLength = 1;
@@ -159,11 +205,12 @@ function wirePage(page) {
   page.on('framenavigated', (frame) => {
     try {
       if (frame !== page.mainFrame()) return;
+      bumpActivity();
       emitMeta();
     } catch (e) {}
   });
 
-  page.on('domcontentloaded', () => emitMeta());
+  page.on('domcontentloaded', () => { bumpActivity(); emitMeta(); });
 
   page.on('close', () => {
     if (wk.page === page) wk.page = null;
@@ -193,29 +240,70 @@ async function emitMeta() {
 }
 
 function startFrameLoop() {
-  stopFrameLoop();
-  wk.timer = setInterval(async () => {
-    if (!wk.active || !wk.page || wk.inFlight) return;
-    wk.inFlight = true;
-    try {
-      // scale:'css' keeps frames at viewport CSS size — full-DPR jpegs cost
-      // ~400ms each and cap the stream near 2 fps; CSS scale sustains ~8.
-      const buf = await wk.page.screenshot({ type: 'jpeg', quality: 70, scale: 'css', timeout: 4000 });
-      wk.lastFrame = buf;
-      send('webkit:frame', { dataUrl: 'data:image/jpeg;base64,' + buf.toString('base64') });
-    } catch (e) {
-      /* page navigating / closed mid-shot — skip frame */
-    } finally {
-      wk.inFlight = false;
+  const gen = ++wk.loopGen; // implicitly stops any previous loop
+  wk.lastB64 = null;
+  bumpActivity();
+  (async () => {
+    while (wk.active && wk.loopGen === gen) {
+      const page = wk.page;
+      if (!page) { await delay(HIDDEN_POLL_MS); continue; }
+      if (!shellVisible()) { await delay(HIDDEN_POLL_MS); continue; }
+
+      const idle = Date.now() - wk.lastActivity >= SHARP_IDLE_MS;
+      if (idle && !wk.sharpSent) {
+        // Idle: ONE crisp full-DPR frame so text is readable. The fast loop
+        // below keeps probing for changes and resumes streaming on motion.
+        try {
+          const buf = await page.screenshot({
+            type: 'jpeg', quality: SHARP_QUALITY, scale: 'device', timeout: 8000,
+          });
+          if (!wk.active || wk.loopGen !== gen) break;
+          wk.sharpSent = true;
+          wk.lastFrame = buf;
+          send('webkit:frame', {
+            dataUrl: 'data:image/jpeg;base64,' + buf.toString('base64'),
+            w: wk.viewport ? wk.viewport.width : undefined,
+            h: wk.viewport ? wk.viewport.height : undefined,
+            sharp: true,
+          });
+        } catch (e) {
+          // device-scale shot failed (navigation mid-shot / huge page) —
+          // don't retry-spin: mark sent; any activity re-arms it.
+          wk.sharpSent = true;
+        }
+      } else {
+        try {
+          // scale:'css' keeps frames at viewport CSS size — full-DPR jpegs
+          // cost ~400ms each; CSS scale sustains a fluid stream.
+          const buf = await page.screenshot({
+            type: 'jpeg', quality: FRAME_QUALITY, scale: 'css', timeout: 4000,
+          });
+          if (!wk.active || wk.loopGen !== gen) break;
+          const b64 = buf.toString('base64');
+          if (b64 !== wk.lastB64) {
+            // Content changed: stream it, and treat motion as activity so
+            // the sharp frame waits for the page to settle (no flicker
+            // between sharp and css frames during animations).
+            wk.lastB64 = b64;
+            wk.lastFrame = buf;
+            bumpActivity();
+            send('webkit:frame', {
+              dataUrl: 'data:image/jpeg;base64,' + b64,
+              w: wk.viewport ? wk.viewport.width : undefined,
+              h: wk.viewport ? wk.viewport.height : undefined,
+            });
+          }
+        } catch (e) {
+          /* page navigating / closed mid-shot — skip frame */
+        }
+      }
+      await delay(FRAME_BREATHER_MS);
     }
-  }, FRAME_INTERVAL_MS);
+  })().catch(() => { /* loop must never throw */ });
 }
 
 function stopFrameLoop() {
-  if (wk.timer) {
-    clearInterval(wk.timer);
-    wk.timer = null;
-  }
+  wk.loopGen += 1; // running loop sees the generation change and exits
 }
 
 async function nav(options) {
@@ -223,6 +311,7 @@ async function nav(options) {
   const url = options && options.url;
   try {
     if (!wk.active || !wk.page) return { ok: false, error: 'webkit not active' };
+    bumpActivity();
     if (action === 'go') {
       if (!url) return { ok: false, error: 'nav go requires url' };
       wk.histIndex += 1;
@@ -249,6 +338,7 @@ async function nav(options) {
 async function input(a) {
   try {
     if (!wk.active || !wk.page) return { ok: false, error: 'webkit not active' };
+    bumpActivity(); // forwarded input resumes the fast css-scale loop
     const p = wk.page;
     const type = a && a.type;
     switch (type) {
@@ -356,7 +446,7 @@ async function closeContext() {
 async function stop() {
   wk.active = false;
   stopFrameLoop();
-  wk.inFlight = false;
+  wk.lastB64 = null;
   await closeContext();
   return { ok: true };
 }

@@ -103,11 +103,14 @@
 .brand-samsung .hw-voldown { right: -3px; top: 240px; height: 56px; border-radius: 0 2.5px 2.5px 0; }
 .brand-samsung .hw-power   { right: -3px; top: 312px; height: 62px; border-radius: 0 2.5px 2.5px 0; }
 
-/* small phones: keep buttons in the upper third */
-.body-aluminum .hw-volup   { top: 150px; height: 48px; }
-.body-aluminum .hw-voldown { top: 208px; height: 48px; }
-.body-aluminum .hw-action  { display: block; left: -3px; top: 108px; height: 26px; border-radius: 2.5px 0 0 2.5px; } /* ring/silent switch */
-.body-aluminum .hw-power   { top: 168px; height: 64px; }
+/* modern aluminum iPhones: ring/silent (or Action) switch above the volume */
+.body-aluminum .hw-action  { display: block; }
+
+/* small classic phones (SE): keep buttons in the upper third */
+.body-classic-button .hw-volup   { top: 150px; height: 48px; }
+.body-classic-button .hw-voldown { top: 208px; height: 48px; }
+.body-classic-button .hw-action  { display: block; left: -3px; top: 108px; height: 26px; border-radius: 2.5px 0 0 2.5px; } /* ring/silent switch */
+.body-classic-button .hw-power   { top: 168px; height: 64px; }
 
 /* ---------- bodyStyle: titanium-pro (iPhone Pro) --------------------------- */
 
@@ -129,22 +132,45 @@
   background: linear-gradient(90deg, #c0c0c6, #76767c 50%, #5a5a60);
 }
 
-/* ---------- bodyStyle: aluminum (classic iPhone, big bezels) --------------- */
+/* ---------- bodyStyle: aluminum (modern non-Pro iPhone 14/15/16/17/Air) ----
+   Edge-to-edge glass, slim even bezels, NO home button, NO visible
+   earpiece/camera (the front is just the cutout drawn in #cutout), an
+   aluminum band a touch lighter than titanium-pro, Apple button layout.    */
 
-.body-aluminum { --band-w: 4px; }
+.body-aluminum { --band-w: 5px; }
 .body-aluminum .frame-band {
+  background:
+    /* antenna line breaks in the band */
+    linear-gradient(rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 0 16% / 5px 3px,
+    linear-gradient(rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 100% 16% / 5px 3px,
+    linear-gradient(rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 0 88% / 5px 3px,
+    linear-gradient(rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 100% 88% / 5px 3px,
+    linear-gradient(90deg, rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 22% 0 / 3px 5px,
+    linear-gradient(90deg, rgba(235, 237, 242, 0.7), rgba(235, 237, 242, 0.7)) no-repeat 78% 100% / 3px 5px,
+    /* satin aluminum — lighter than the brushed titanium */
+    linear-gradient(165deg, #c9cacf 0%, #9d9ea4 16%, #75767c 42%,
+                            #696a70 55%, #8b8c92 78%, #bfc0c5 100%);
+}
+.body-aluminum .hw {
+  background: linear-gradient(90deg, #d2d2d7, #8e8e94 50%, #6e6e74);
+}
+
+/* ---------- bodyStyle: classic-button (iPhone SE: home button) ------------- */
+
+.body-classic-button { --band-w: 4px; }
+.body-classic-button .frame-band {
   background: linear-gradient(165deg, #55555a 0%, #3a3a3f 22%, #232327 55%,
                                       #313136 82%, #4c4c51 100%);
 }
-.body-aluminum .frame-face {
+.body-classic-button .frame-face {
   background: linear-gradient(180deg, #131316 0%, #0a0a0c 40%, #060608 100%);
 }
-.body-aluminum .hw {
+.body-classic-button .hw {
   background: linear-gradient(90deg, #6c6c72, #3c3c41);
 }
 
 /* earpiece slot in the forehead */
-.body-aluminum .frame-face::before {
+.body-classic-button .frame-face::before {
   content: '';
   position: absolute;
   top: calc(var(--bz-t, 88px) / 2 - 8px);
@@ -157,7 +183,7 @@
               0 0.5px 0 rgba(255, 255, 255, 0.06);
 }
 /* front camera dot left of the earpiece */
-.body-aluminum .frame-face::after {
+.body-classic-button .frame-face::after {
   content: '';
   position: absolute;
   top: calc(var(--bz-t, 88px) / 2 - 9px);
@@ -168,7 +194,7 @@
   box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.04);
 }
 
-/* the clickable home button in the chin */
+/* the clickable home button in the chin — classic-button bodies ONLY */
 #hw-home-button {
   display: none;
   position: absolute;
@@ -187,7 +213,7 @@
   cursor: pointer;
 }
 #hw-home-button:active { filter: brightness(1.5); }
-.body-aluminum #hw-home-button { display: block; }
+.body-classic-button #hw-home-button { display: block; }
 /* squircle hint engraved on the home button */
 #hw-home-button::after {
   content: '';
