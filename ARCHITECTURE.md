@@ -457,6 +457,81 @@ moved >3px → live arbitrary drag selection (never overridden);
 double-click → word; triple-click → select all. Inputs get
 `touch-action:none` so pointermove streams under touch emulation.
 
+## v0.1.4 extensions (ENGINE + renderer input pipeline)
+
+### Native scroll physics — `guest:gesture` IPC
+
+The v0.1.2 synthetic in-guest `window.scrollBy` made scrolling work but feel
+dead: stepwise, no momentum, no fling. Replaced by NATIVE input replay on the
+guest's CDP debugger.
+
+New IPC `guest:gesture {samples:[...]}` → `{ok, dispatched}` (preload:
+`devphone.guestGesture(samples)`). Sample shapes (guest CSS px, `t` =
+`Date.now()` ms):
+- `{phase:'start'|'move', x, y, t}` → `Input.dispatchTouchEvent`
+  touchStart/touchMove (`timestamp` = t/1000 — Chromium derives the FLING
+  velocity from these, so they are real per-move times)
+- `{phase:'end'|'cancel', x, y, t}` → touchEnd/touchCancel (empty touchPoints)
+- `{phase:'wheel', x, y, dx, dy, t}` → `Input.dispatchMouseEvent` mouseWheel
+
+`emulation.dispatchGesture(wc, samples)` serializes all batches through a
+promise chain (start/move/end order survives concurrent IPC). WebKit engine
+returns `{ok:false}` — its `webkit:input` path is unchanged.
+
+Renderer (#touch-layer): touch-mode drags batch pointermove samples per rAF
+(taps still take the synthetic-click path; the 8px/700ms discrimination is
+unchanged); the gesture end flushes IMMEDIATELY so release timing isn't a
+frame stale. Wheel (BOTH input modes) coalesces one mouseWheel sample per
+frame. The old synthetic scrollBy stays as automatic FALLBACK: the first
+`{ok:false}` flips a latch, the failed batch's distance is recovered
+synthetically, and every later drag/wheel uses the old path.
+
+**Wheel sign (measured, probe-cdpscroll*.js):** Electron 36 passes
+`Input.dispatchMouseEvent` mouseWheel deltas to the page UNCHANGED, DOM-
+signed — positive deltaY scrolls content down. Senders use DOM-signed deltas.
+
+**Fling (measured):** flick 180px → release → scrollY keeps growing ~500ms
+(e.g. 139→575 across post-release samples), decaying naturally. A slow drag
+with a hold tracks ~1:1 (200px drag → 185px scroll; ~15px native touch slop).
+
+### `setEmitTouchEventsForMouse` is now ALWAYS OFF (capture-trap root fix)
+
+With it enabled, the guest installs a window-wide mouse hook as soon as it
+processes ANY real input — which now includes every dispatched touch gesture,
+so each drag re-armed the v0.1.2 "press twice" trap (measured: the next shell
+click was routed into the guest; the shell DOM saw nothing; `wv.blur()` did
+NOT release it). Nothing needs mouse→touch conversion anymore: drags arrive
+as real touch via CDP, taps are synthetic, and forwarded hover mouseMoves —
+formerly swallowed by the emulator — now arrive as real mousemoves (:hover
+works). `setTouchEmulationEnabled` (maxTouchPoints/ontouchstart identity)
+still follows the input mode. Bonus: in touch mode, real right-clicks now
+reach the shell DOM normally (`button===2`), the synthesized `button===-1`
+contextmenu path remains as harmless fallback.
+
+### Renderer robustness fixes
+
+- Stale-press healing: if a layer pointerdown arrives while a press is still
+  open (dropped pointerup — this transparent frameless window sporadically
+  loses events), the old gesture is closed out (touchCancel / mouseUp) instead
+  of swallowing the new one whole.
+- Post-gesture `guestBlurUnlessEditing` after each native drag end (belt &
+  braces; the compositor fling survives the blur — suite-verified).
+- browser-chrome `.menu-catcher` release: only hides the catcher when no
+  menu is open — the opening click's own pointerup used to drop the shield,
+  leaving an open menu that a page click could no longer close (previously
+  masked by the stale-press leak).
+
+### Suite updates (merge gates)
+
+`scratch/test-gestures-v012.js` → 12 checks: + wheel in MOUSE input mode,
+slow-drag distance tracking, flick→fling (3+ growing post-release samples,
+total > dragged distance). Drags are now driven as PointerEvents dispatched
+on the #touch-layer (deterministic; window-level CDP touch streams get taken
+over by the compositor → pointercancel + native guest fling outside the
+pipeline under test). `scratch/test-ui-v012.js` unchanged: 27 scenarios.
+Both suites green twice consecutively; selftest
+`--st-device=galaxy-s26-ultra` still reports 412×804.
+
 ### Guest WebAuthn shim (tap-beacon injection)
 
 Chromium exposes `PublicKeyCredential`, so passkey-first sites (e.g. the

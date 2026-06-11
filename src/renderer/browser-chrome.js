@@ -316,7 +316,18 @@
     });
     function release(e) {
       if (e) { e.preventDefault(); e.stopPropagation(); }
-      cat.hidden = true;
+      // hide the catcher only when no menu is open anymore. The pointerUP
+      // of the very click that OPENED a menu (menus open on mousedown of
+      // ⋮/⋯) lands on the freshly shown catcher — unconditionally hiding
+      // here dropped the shield while the menu was still open, so the next
+      // page press hit the touch-layer (which preventDefaults, so the
+      // document-mousedown closer never saw it) and the menu stayed open.
+      // (v0.1.4; previously masked by a stale-press leak in the layer.)
+      var anyOpen = ['chr-menu-pop', 'sam-menu-pop'].some(function (id) {
+        var n = $(id);
+        return !!(n && !n.hidden);
+      });
+      if (!anyOpen) cat.hidden = true;
     }
     cat.addEventListener('pointerup', release);
     cat.addEventListener('pointercancel', release);

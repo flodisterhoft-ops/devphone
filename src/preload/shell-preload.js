@@ -24,6 +24,7 @@ const INVOKE_CHANNELS = [
   'updater:check',
   'devices:dismiss', // extension: hide an auto-discovered device
   'webkit:input',
+  'guest:gesture', // v0.1.4: batched drag/wheel samples → native CDP replay
   'input:set', // v0.1.1: 'touch' | 'mouse'
   'shell:activate', // v0.1.1: focus the OS window before a click lands
   'shell:resize',
@@ -81,6 +82,7 @@ const api = {
   updaterCheck: () => invoke('updater:check'),
   devicesDismiss: (id) => invoke('devices:dismiss', { id }),
   webkitInput: (input) => invoke('webkit:input', input),
+  guestGesture: (samples) => invoke('guest:gesture', { samples }), // v0.1.4
   inputSet: (mode) => invoke('input:set', { mode }), // v0.1.1: 'touch' | 'mouse'
   shellActivate: () => invoke('shell:activate'), // v0.1.1: first-click fix
   shellResize: (width, height) => invoke('shell:resize', { width, height }),

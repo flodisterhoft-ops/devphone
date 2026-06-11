@@ -333,16 +333,28 @@ async function applyDevice(wc, device, options) {
 }
 
 // v0.1.1: shared by applyDevice and setInputMode so the two can never drift.
-// touch (default): emulated touch, 5 points, mouse synthesizes touch events.
+// touch (default): emulated touch identity, 5 points.
 // mouse: plain desktop mouse — text selection, drag-to-highlight, native
 // cursor. UA/metrics untouched (still a phone).
+//
+// v0.1.4: setEmitTouchEventsForMouse is now ALWAYS OFF. It was the root of
+// the capture trap: with it enabled, the guest installs a window-wide mouse
+// hook the moment it processes ANY real input — which since v0.1.4 includes
+// every CDP-dispatched touch gesture, so each drag re-armed the trap and the
+// next shell click was routed into the guest (measured: shell DOM saw no
+// events while the guest got the pointerdown; wv.blur() did NOT release it).
+// Nothing needs the mouse→touch conversion anymore: drags arrive as REAL
+// touch via Input.dispatchTouchEvent, taps are the synthetic in-guest
+// sequence, and forwarded hover mouseMoves were being swallowed by the
+// emulator anyway (E36) — with it off they arrive as normal mousemoves and
+// :hover works. setTouchEmulationEnabled (identity: maxTouchPoints,
+// ontouchstart) stays on in touch mode.
 async function applyInputModeCommands(cdp, mode) {
+  await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: false });
   if (mode === 'mouse') {
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
-    await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: false });
   } else {
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
-    await cdp('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' });
   }
 }
 
@@ -362,6 +374,80 @@ async function setInputMode(wc, mode) {
   const m = mode === 'mouse' ? 'mouse' : 'touch';
   await applyInputModeCommands(cdp, m);
   return { ok: true, mode: m };
+}
+
+// v0.1.4: NATIVE input replay on the guest debugger (chromium engine).
+// The renderer's #touch-layer samples drags/wheels and ships them here; we
+// replay them as real CDP input so Chromium's own scroll physics run in the
+// guest: smooth tracking, momentum fling from release velocity, proper
+// touch events to the page. CDP injects directly into the guest renderer —
+// it never goes through Electron's browser-level input routing, so the
+// touch-emulation window capture trap (the v0.1.2 "press twice" bug) can
+// not re-arm (verified by the UI suite S4/S5 one-click scenarios).
+//
+// Sample shapes (coordinates in guest CSS px, t = Date.now() ms):
+//   {phase:'start'|'move', x, y, t}   → Input.dispatchTouchEvent
+//   {phase:'end'|'cancel', x, y, t}   → touchEnd/touchCancel (no points)
+//   {phase:'wheel', x, y, dx, dy, t}  → Input.dispatchMouseEvent mouseWheel
+//
+// Wheel delta sign: Electron 36 / Chromium 136 passes CDP wheel deltas
+// through to the page UNCHANGED and the default scroll handling is
+// DOM-signed — positive deltaY scrolls content DOWN (verified empirically:
+// scratch/probe-gest6.js + the gesture suite's wheel scenarios, which drive
+// this exact path end-to-end). Callers therefore send DOM-signed deltas.
+let gestureChain = Promise.resolve();
+
+async function dispatchGestureSample(wc, s) {
+  if (!s || typeof s !== 'object') return;
+  const x = Math.round(Number(s.x) || 0);
+  const y = Math.round(Number(s.y) || 0);
+  if (s.phase === 'wheel') {
+    await wc.debugger.sendCommand('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x, y,
+      deltaX: Number(s.dx) || 0,
+      deltaY: Number(s.dy) || 0,
+      pointerType: 'mouse',
+    });
+    return;
+  }
+  const type =
+    s.phase === 'start' ? 'touchStart' :
+    s.phase === 'end' ? 'touchEnd' :
+    s.phase === 'cancel' ? 'touchCancel' : 'touchMove';
+  const params = {
+    type,
+    touchPoints: (type === 'touchEnd' || type === 'touchCancel')
+      ? []
+      : [{ x, y, id: 1 }],
+  };
+  // real timestamps (seconds since epoch) — Chromium's velocity tracker
+  // derives the fling speed from touchMove spacing, so these matter
+  const t = Number(s.t) || 0;
+  if (t > 0) params.timestamp = t / 1000;
+  await wc.debugger.sendCommand('Input.dispatchTouchEvent', params);
+}
+
+// Serialized: batches arrive per-rAF from the renderer and CDP dispatch is
+// async — a promise chain guarantees touchStart/move/end order even when a
+// new batch lands while the previous one is still in flight.
+function dispatchGesture(wc, samples) {
+  if (!wc || wc.isDestroyed()) {
+    return Promise.resolve({ ok: false, error: 'no screen attached' });
+  }
+  if (!Array.isArray(samples) || !samples.length) {
+    return Promise.resolve({ ok: true, dispatched: 0 });
+  }
+  const run = gestureChain.then(async () => {
+    if (wc.isDestroyed()) return { ok: false, error: 'webContents destroyed' };
+    if (!wc.debugger.isAttached()) return { ok: false, error: 'debugger not attached' };
+    for (const s of samples) {
+      await dispatchGestureSample(wc, s); // sequential — order is everything
+    }
+    return { ok: true, dispatched: samples.length };
+  }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+  gestureChain = run.then(() => {}); // a failed batch never sticks the chain
+  return run;
 }
 
 async function setStandalone(wc, on) {
@@ -449,6 +535,7 @@ module.exports = {
   attachScreen,
   applyDevice,
   applySafeArea,
+  dispatchGesture, // v0.1.4: native drag/wheel replay on the guest debugger
   injectCfg,
   setStandalone,
   setInputMode,

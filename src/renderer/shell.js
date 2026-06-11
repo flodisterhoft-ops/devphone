@@ -1001,8 +1001,87 @@
       }, 16);
     }
 
+    /* v0.1.4: NATIVE scroll pipeline. Drag/wheel samples are batched per rAF
+       and replayed in main on the GUEST's CDP debugger (Input.dispatchTouch-
+       Event / Input.dispatchMouseEvent mouseWheel — see emulation.js
+       dispatchGesture). That gives Chromium's real scroll physics: smooth
+       tracking, momentum FLING from release velocity, rubber-band-style
+       feel, and proper touchmove events to the page. CDP injects directly
+       into the guest renderer, so the window-wide capture trap that real
+       forwarded input arms under touch emulation can not return.
+       The synthetic in-guest scrollBy above stays as the AUTOMATIC FALLBACK:
+       the first {ok:false} from guest:gesture (debugger detached, channel
+       missing, …) flips gestureBroken and every later drag/wheel takes the
+       old path. WebKit engine is untouched (its canvas pipeline below).     */
+    var gestureBroken = false;
+    var samplesPending = [];
+    var samplesScheduled = false;
+
+    function sendSampleBatch(batch) {
+      invoke('guest:gesture', { samples: batch }).then(function (res) {
+        if (res && res.ok !== false) return;
+        gestureBroken = true;
+        // recover the ground this failed batch covered via the old path
+        var touches = batch.filter(function (s) {
+          return s.phase === 'start' || s.phase === 'move';
+        });
+        if (touches.length >= 2) {
+          var a = touches[0], b = touches[touches.length - 1];
+          // finger up (y shrinking) scrolls content down → invert the path
+          scrollGuest({ x: b.x, y: b.y }, a.x - b.x, a.y - b.y);
+        }
+        batch.forEach(function (s) {
+          if (s.phase === 'wheel') scrollGuest({ x: s.x, y: s.y }, s.dx, s.dy);
+        });
+      });
+    }
+
+    function flushSamples() {
+      if (!samplesPending.length) return;
+      var batch = samplesPending;
+      samplesPending = [];
+      sendSampleBatch(batch);
+    }
+
+    // batched per animation frame: one IPC round-trip per frame, real
+    // per-move timestamps preserved (fling velocity comes from them).
+    // flushNow (gesture end / wheel) ships immediately — release timing
+    // must not lag a frame behind or the fling velocity reads stale.
+    function queueSample(s, flushNow) {
+      samplesPending.push(s);
+      if (flushNow) { flushSamples(); return; }
+      if (samplesScheduled) return;
+      samplesScheduled = true;
+      requestAnimationFrame(function () {
+        samplesScheduled = false;
+        flushSamples();
+      });
+    }
+
+    // wheel: coalesce a frame's worth of wheel deltas into ONE mouseWheel
+    // sample (DOM-signed deltas — positive deltaY scrolls content down,
+    // matching what the guest-side dispatch expects; see emulation.js).
+    var wheelAcc = null;
+    function queueNativeWheel(local, dx, dy) {
+      if (gestureBroken) { queueGuestScroll(local, dx, dy); return; }
+      if (wheelAcc) {
+        wheelAcc.x = local.x;
+        wheelAcc.y = local.y;
+        wheelAcc.dx += dx;
+        wheelAcc.dy += dy;
+        return;
+      }
+      wheelAcc = { phase: 'wheel', x: local.x, y: local.y, dx: dx, dy: dy, t: Date.now() };
+      requestAnimationFrame(function () {
+        var s = wheelAcc;
+        wheelAcc = null;
+        if (s && (Math.abs(s.dx) >= 0.5 || Math.abs(s.dy) >= 0.5)) queueSample(s, true);
+      });
+    }
+
     // coalesce per-pointermove deltas into ~16ms batches (one in-guest eval
-    // per tick instead of one per move; fast flicks stay smooth)
+    // per tick instead of one per move; fast flicks stay smooth) — FALLBACK
+    // path only (gestureBroken), plus wheel recovery above.
     var scrollAcc = null, scrollTimer = null;
     function queueGuestScroll(local, dx, dy) {
       if (!scrollAcc) scrollAcc = { x: local.x, y: local.y, dx: 0, dy: 0 };
@@ -1027,7 +1106,20 @@
     var lastHover = 0;
 
     layer.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0 || press) return;
+      if (e.button !== 0) return;
+      if (press) {
+        // the previous gesture never delivered its pointerup/cancel (input
+        // streams on this transparent frameless window sporadically drop
+        // events) — close it out instead of letting the stale press eat
+        // this gesture: the next tap would otherwise be swallowed whole.
+        if (press.drag && !gestureBroken) {
+          queueSample({ phase: 'cancel', x: press.lastX, y: press.lastY, t: Date.now() }, true);
+        } else if (press.mouse) {
+          var mu = fwdXY(e);
+          sendToGuest({ type: 'mouseUp', x: mu.x, y: mu.y, button: 'left', clickCount: 1 });
+        }
+        press = null;
+      }
       e.preventDefault();
       try { layer.setPointerCapture(e.pointerId); } catch (err) {}
       if (state.inputMode === 'mouse') {
@@ -1036,7 +1128,12 @@
         sendToGuest({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
         return;
       }
-      press = { t: Date.now(), lastX: e.clientX, lastY: e.clientY };
+      press = {
+        t: Date.now(),
+        lastX: e.clientX, lastY: e.clientY,
+        startLocal: localXY(e),   // touchStart anchor for the native gesture
+        drag: false               // becomes a drag once movedPx > 8
+      };
       movedPx = 0;
     });
 
@@ -1066,16 +1163,29 @@
       press.lastY = e.clientY;
       movedPx += Math.abs(dx) + Math.abs(dy);
       if (movedPx > 8 && (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5)) {
-        var s = state.scale || 1;
-        // drag = scroll, performed synthetically inside the guest; dragging
-        // the finger UP (dy < 0) must scroll the content DOWN → negate.
-        queueGuestScroll(localXY(e), -dx / s, -dy / s);
+        if (gestureBroken) {
+          var s = state.scale || 1;
+          // fallback: synthetic in-guest scroll; dragging the finger UP
+          // (dy < 0) must scroll the content DOWN → negate.
+          queueGuestScroll(localXY(e), -dx / s, -dy / s);
+          return;
+        }
+        // native path: replay the finger itself (touchStart at the original
+        // press point, then the real move trail with real timestamps) —
+        // Chromium's gesture recognizer does direction/physics/fling.
+        if (!press.drag) {
+          press.drag = true;
+          queueSample({ phase: 'start', x: press.startLocal.x, y: press.startLocal.y, t: press.t });
+        }
+        var lp = localXY(e);
+        queueSample({ phase: 'move', x: lp.x, y: lp.y, t: Date.now() });
       }
     });
 
     function endPress(e) {
       if (!press) return;
       var wasMouse = press.mouse;
+      var wasDrag = press.drag;
       var dt = Date.now() - (press.t || 0);
       var tap = !wasMouse && movedPx < 8 && dt < 700;
       press = null;
@@ -1084,8 +1194,25 @@
         sendToGuest({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
         return;   // mouse mode: no touch emulation → no capture trap
       }
-      if (tap) syntheticTap(localXY(e));
-      // scroll gestures need no cleanup: nothing pulled guest focus
+      if (tap) { syntheticTap(localXY(e)); return; }   // taps stay synthetic
+      if (wasDrag && !gestureBroken) {
+        // terminate the native touch sequence NOW (flushed immediately) —
+        // Chromium computes the fling velocity at this exact moment
+        var lp = localXY(e);
+        queueSample({
+          phase: e.type === 'pointercancel' ? 'cancel' : 'end',
+          x: lp.x, y: lp.y, t: Date.now()
+        }, true);
+        // real touch inside the guest re-arms the browser-level mouse
+        // capture (the guest grabs capture+focus once it processes real
+        // input — same trap as v0.1.2, measured: the NEXT shell click was
+        // routed into the guest, shell DOM saw nothing). Heal proactively
+        // like the tap beacon does: blur the guest unless it is editing.
+        // The momentum fling is compositor-driven and survives the blur
+        // (verified: the gesture suite's fling samples keep growing).
+        setTimeout(guestBlurUnlessEditing, 140);
+      }
+      // fallback scroll gestures need no cleanup: nothing pulled guest focus
     }
     layer.addEventListener('pointerup', function (e) {
       if (e.button !== 0) return;
@@ -1096,8 +1223,9 @@
     layer.addEventListener('wheel', function (e) {
       e.preventDefault();
       var s = state.scale || 1;
-      // both sides are DOM-signed → apply 1:1 (descaled by visual zoom)
-      queueGuestScroll(localXY(e), e.deltaX / s, e.deltaY / s);
+      // both sides are DOM-signed → apply 1:1 (descaled by visual zoom).
+      // Native CDP mouseWheel in BOTH input modes; synthetic fallback inside.
+      queueNativeWheel(localXY(e), e.deltaX / s, e.deltaY / s);
     }, { passive: false });
   }
 

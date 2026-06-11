@@ -221,6 +221,19 @@ function init(options) {
     return webkit.input(input);
   });
 
+  // v0.1.4: native drag/wheel replay on the GUEST debugger (chromium engine).
+  // Batched samples {phase:'start'|'move'|'end'|'cancel'|'wheel', x, y, t,
+  // dx?, dy?} are dispatched as Input.dispatchTouchEvent / mouseWheel — real
+  // Chromium scroll physics (momentum fling, smooth wheel). The renderer
+  // falls back to its synthetic in-guest scrollBy on any {ok:false}.
+  // WebKit engine keeps its existing webkit:input path.
+  handle('guest:gesture', async ({ samples }) => {
+    if (state.engineMode !== 'chromium') {
+      return { ok: false, error: 'webkit engine: use webkit:input' };
+    }
+    return emulation.dispatchGesture(state.screenWC, samples);
+  });
+
   handle('shell:resize', async ({ width, height }) => {
     const win = state.shellWindow;
     if (!win || win.isDestroyed()) return { ok: false, error: 'no shell window' };
