@@ -6,6 +6,25 @@
 appId: com.devphone.app
 productName: DevPhone
 
+# Cloud auto-update feed: a PUBLIC releases-only repo (installers + latest.yml,
+# no source). electron-builder bakes this into app-update.yml so the installed
+# app knows where to look; `npm run release` publishes new versions here.
+publish:
+  provider: github
+  owner: flodisterhoft-ops
+  repo: devphone-releases
+  # GitHub returns 422 for a *published* release whose tag doesn't exist yet, so
+  # electron-builder uploads to a DRAFT; scripts/release.js flips it to published
+  # (which creates the tag) once the installer + latest.yml are attached.
+  releaseType: draft
+
+# Changelog for the in-app "What's new" popup. scripts/gen-notes.js regenerates
+# build/release-notes.md from git commits before each release; electron-builder
+# embeds it into latest.yml (→ electron-updater releaseNotes) and the GitHub
+# release body.
+releaseInfo:
+  releaseNotesFile: build/release-notes.md
+
 directories:
   output: dist
 
@@ -13,21 +32,36 @@ files:
   - package.json
   - src/**/*
   - devices/**/*
+  - build-info.json
 
 extraResources:
   - from: pw-browsers
     to: pw-browsers
 
+# v0.1.5 local self-update plumbing: every build is stamped with its build
+# time + project dir (travels inside the asar), and dist/latest-build.json
+# describes the newest local build. Installed apps compare the two on launch
+# and offer a silent reinstall (src/main/selfupdate.js).
+beforePack: scripts/stamp-build.js
+afterAllArtifactBuild: scripts/local-publish.js
+
 win:
   target:
     - nsis
     - portable
-  # We don't code-sign; skipping the exe-edit step also avoids the
-  # winCodeSign cache extraction, which needs symlink privileges
-  # (Developer Mode / admin) that normal Windows accounts lack.
-  signAndEditExecutable: false
+  icon: build/icon.ico
+  # Skip ONLY code signing (no certificate). electron-builder still embeds the
+  # icon + version metadata through its pure-JS `resedit` path, so the exe shows
+  # the phone icon in Explorer / the taskbar. `signExecutable: false` avoids the
+  # winCodeSign cache extraction (its macOS symlinks need Developer Mode / admin
+  # privileges a normal Windows account lacks) — that was why the old
+  # `signAndEditExecutable: false` had to drop the icon too.
+  signExecutable: false
 
 nsis:
   oneClick: true
   perMachine: false
   deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico

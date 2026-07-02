@@ -29,6 +29,8 @@
  */
 
 const { clipboard } = require('electron');
+const fs = require('fs');
+const path = require('path');
 const emulation = require('./emulation');
 
 const ctx = {
@@ -62,6 +64,39 @@ const HIDDEN_POLL_MS = 250; // re-check cadence while the shell is hidden
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Persistent storage state (v0.1.5) ───────────────────────────────
+// Chromium mode keeps logins via the persist:devphone partition; WebKit
+// mode used to start a fresh context every time (engine switch, device
+// switch, relaunch) so sites demanded a login on every visit. Cookies +
+// localStorage now round-trip through a storageState file in userData.
+let storageFile; // undefined = unresolved, null = unavailable (harness)
+function storageStatePath() {
+  if (storageFile !== undefined) return storageFile;
+  try {
+    const { app } = require('electron');
+    storageFile = path.join(app.getPath('userData'), 'webkit-storage.json');
+  } catch (e) {
+    storageFile = null;
+  }
+  return storageFile;
+}
+
+async function saveStorageState(context) {
+  const file = storageStatePath();
+  const c = context || wk.context;
+  if (!file || !c) return;
+  try { await c.storageState({ path: file }); } catch (e) {}
+}
+
+let saveTimer = null;
+function scheduleStorageSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    saveStorageState().catch(() => {});
+  }, 2000);
 }
 
 // Any user intent or page motion: defers the sharp frame and re-arms it.
@@ -145,13 +180,25 @@ async function start(options) {
       width: (vpo && vpo.width) || (device.viewport && device.viewport.width) || 390,
       height: (vpo && vpo.height) || (device.viewport && device.viewport.height) || 844,
     };
-    wk.context = await wk.browser.newContext({
+    const ctxOptions = {
       viewport: vp,
       deviceScaleFactor: device.dpr || 2,
       isMobile: true,
       hasTouch: true,
       userAgent: device.ua,
-    });
+    };
+    const stateFile = storageStatePath();
+    if (stateFile && fs.existsSync(stateFile)) {
+      try {
+        wk.context = await wk.browser.newContext(
+          Object.assign({ storageState: stateFile }, ctxOptions));
+      } catch (e) {
+        // Corrupt/incompatible state file — drop it and start clean.
+        try { fs.unlinkSync(stateFile); } catch (e2) {}
+        wk.context = null;
+      }
+    }
+    if (!wk.context) wk.context = await wk.browser.newContext(ctxOptions);
     await wk.context.addInitScript({ content: buildInitScript(device, standalone) });
 
     wk.page = await wk.context.newPage();
@@ -210,7 +257,7 @@ function wirePage(page) {
     } catch (e) {}
   });
 
-  page.on('domcontentloaded', () => { bumpActivity(); emitMeta(); });
+  page.on('domcontentloaded', () => { bumpActivity(); emitMeta(); scheduleStorageSave(); });
 
   page.on('close', () => {
     if (wk.page === page) wk.page = null;
@@ -325,6 +372,8 @@ async function nav(options) {
       if (res !== null && wk.histIndex < wk.histLength - 1) wk.histIndex += 1;
     } else if (action === 'reload') {
       await wk.page.reload({ timeout: 30000 }).catch(() => {});
+    } else if (action === 'hardReload') {
+      await wk.page.reload({ timeout: 30000 }).catch(() => {});
     } else {
       return { ok: false, error: 'unknown nav action: ' + action };
     }
@@ -436,8 +485,92 @@ async function closeContext() {
   const c = wk.context;
   wk.context = null;
   wk.page = null;
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   if (c) {
+    await saveStorageState(c).catch(() => {});
     try { await c.close(); } catch (e) {}
+  }
+}
+
+// ── Standalone headed WebKit window (v0.1.5) ────────────────────────
+// "Open in WebKit window": a real, interactive WebKit window at native
+// speed (no frame streaming) for previewing the current page. Separate
+// HEADED browser process (the streaming engine stays headless); same
+// device identity (viewport/dpr/UA/shims) and the SAME storage state
+// file, so logins made in either place carry over to the other.
+const hw = { browser: null, context: null, page: null };
+
+async function openWindow(options) {
+  const device = options && options.device;
+  const url = (options && options.url) || 'about:blank';
+  if (!device) return { ok: false, error: 'no device selected' };
+  try {
+    if (!wk.playwright) wk.playwright = require('playwright');
+
+    // Already open → just retarget and surface the existing window.
+    if (hw.page && !hw.page.isClosed()) {
+      await hw.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+      await hw.page.bringToFront().catch(() => {});
+      return { ok: true, reused: true };
+    }
+
+    if (!hw.browser || !hw.browser.isConnected()) {
+      hw.browser = await wk.playwright.webkit.launch({ headless: false });
+      hw.browser.on('disconnected', () => {
+        hw.browser = null; hw.context = null; hw.page = null;
+      });
+    }
+
+    const ctxOptions = {
+      viewport: {
+        width: (device.viewport && device.viewport.width) || 390,
+        height: (device.viewport && device.viewport.height) || 844,
+      },
+      deviceScaleFactor: device.dpr || 2,
+      isMobile: true,
+      hasTouch: true,
+      userAgent: device.ua,
+    };
+    const stateFile = storageStatePath();
+    if (stateFile && fs.existsSync(stateFile)) {
+      try {
+        hw.context = await hw.browser.newContext(
+          Object.assign({ storageState: stateFile }, ctxOptions));
+      } catch (e) {
+        hw.context = null;
+      }
+    }
+    if (!hw.context) hw.context = await hw.browser.newContext(ctxOptions);
+    await hw.context.addInitScript({ content: buildInitScript(device, false) });
+
+    hw.page = await hw.context.newPage();
+    hw.page.on('domcontentloaded', () => { saveStorageState(hw.context).catch(() => {}); });
+    hw.page.on('close', async () => {
+      const c = hw.context;
+      hw.context = null; hw.page = null;
+      if (c) {
+        await saveStorageState(c).catch(() => {});
+        try { await c.close(); } catch (e) {}
+      }
+    });
+
+    await hw.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+async function closeWindow() {
+  const b = hw.browser;
+  hw.browser = null;
+  if (hw.context) {
+    await saveStorageState(hw.context).catch(() => {});
+    try { await hw.context.close(); } catch (e) {}
+  }
+  hw.context = null; hw.page = null;
+  if (b) {
+    try { await b.close(); } catch (e) {}
   }
 }
 
@@ -454,6 +587,7 @@ async function stop() {
 // App quit: full shutdown including the browser process.
 async function shutdown() {
   try { await stop(); } catch (e) {}
+  try { await closeWindow(); } catch (e) {}
   const b = wk.browser;
   wk.browser = null;
   if (b) {
@@ -481,11 +615,28 @@ function isActive() {
   return wk.active;
 }
 
+async function getEvidence() {
+  try {
+    if (!wk.active || !wk.page) return null;
+    const info = await wk.page.evaluate(
+      '({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio,' +
+      ' ua: navigator.userAgent, platform: navigator.platform,' +
+      ' touch: navigator.maxTouchPoints, standalone: navigator.standalone, url: location.href })');
+    info.engine = 'webkit';
+    info.viewport = wk.viewport || null;
+    info.deviceId = wk.device ? wk.device.id : null;
+    return info;
+  } catch (e) {
+    return null;
+  }
+}
+
 module.exports = {
   init,
   start,
   stop,
   shutdown,
+  openWindow,
   nav,
   input,
   setPicker,
@@ -494,5 +645,6 @@ module.exports = {
   setDevice,
   getLastFrame,
   captureFull,
+  getEvidence,
   isActive,
 };

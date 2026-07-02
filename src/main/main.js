@@ -10,7 +10,8 @@
 
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, shell, session } = require('electron');
+const { fileURLToPath } = require('url');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -31,6 +32,18 @@ process.env.PLAYWRIGHT_BROWSERS_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'pw-browsers')
   : path.join(ROOT, 'pw-browsers');
 
+// Windows taskbar identity. A frameless Electron app without an explicit
+// AppUserModelID can be grouped under a generic host and show the wrong icon;
+// pinning it to the electron-builder appId gives the running app, its taskbar
+// button and any pinned shortcut one identity + the phone icon.
+if (process.platform === 'win32') {
+  try { app.setAppUserModelId('com.devphone.app'); } catch (e) {}
+}
+
+// Shipped inside the asar (src/**/*); used as the BrowserWindow/taskbar icon so
+// the phone shows even before the exe's embedded icon would apply.
+const APP_ICON = path.join(ROOT, 'src', 'assets', 'icon.png');
+
 const ipc = require('./ipc');
 const webkit = require('./webkit');
 
@@ -39,9 +52,120 @@ const webkit = require('./webkit');
 const argv = process.argv.slice(1);
 const SELFTEST = argv.includes('--selftest');
 let selftestUrl = 'https://example.com';
+function argValue(flag) {
+  const eq = argv.find((a) => a.startsWith(flag + '='));
+  if (eq) return eq.slice(flag.length + 1);
+  const i = argv.indexOf(flag);
+  return (i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-')) ? argv[i + 1] : null;
+}
 if (SELFTEST) {
   const next = argv[argv.indexOf('--selftest') + 1];
   if (next && !/^-/.test(next)) selftestUrl = next;
+}
+
+// ---------- security guardrails ----------
+
+function isHttpUrl(url) {
+  return /^https?:\/\//i.test(String(url || ''));
+}
+
+function openExternalHttp(url) {
+  if (isHttpUrl(url)) shell.openExternal(url).catch(() => {});
+}
+
+function expectedScreenPreload() {
+  return path.join(__dirname, '..', 'preload', 'screen-preload.js');
+}
+
+function filePathFromMaybeUrl(value) {
+  if (!value) return '';
+  try {
+    const s = String(value);
+    if (/^file:/i.test(s)) return fileURLToPath(s);
+    return path.resolve(s);
+  } catch (e) {
+    return '';
+  }
+}
+
+function samePath(a, b) {
+  return path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
+}
+
+function installWebContentsGuards() {
+  app.on('web-contents-created', (_event, contents) => {
+    try {
+      contents.setWindowOpenHandler(({ url }) => {
+        openExternalHttp(url);
+        return { action: 'deny' };
+      });
+    } catch (e) {}
+
+    contents.on('will-navigate', (event, url) => {
+      try {
+        // The shell renderer is local UI and should never be navigated away.
+        // Guest webviews are the actual browser surface and keep normal nav.
+        if (contents.getType && contents.getType() === 'window' && !/^file:/i.test(String(url || ''))) {
+          event.preventDefault();
+          openExternalHttp(url);
+        }
+      } catch (e) {}
+    });
+
+    contents.on('will-attach-webview', (event, webPreferences, params) => {
+      const actualPreload = filePathFromMaybeUrl(params.preloadURL || webPreferences.preload);
+      if (!samePath(actualPreload, expectedScreenPreload())) {
+        console.warn('[security] blocked webview with unexpected preload:', params.preloadURL || webPreferences.preload);
+        event.preventDefault();
+        return;
+      }
+
+      params.partition = 'persist:devphone';
+      webPreferences.nodeIntegration = false;
+      webPreferences.nodeIntegrationInSubFrames = false;
+      webPreferences.nodeIntegrationInWorker = false;
+      webPreferences.contextIsolation = false; // intentional: iOS globals must be patched in page world
+      webPreferences.sandbox = false; // preload needs require('electron') for sync config seeding
+      webPreferences.webSecurity = true;
+      webPreferences.allowRunningInsecureContent = false;
+      webPreferences.plugins = false;
+      webPreferences.experimentalFeatures = false;
+    });
+  });
+}
+
+function configureSessionSecurity() {
+  const sessions = [session.fromPartition('persist:devphone')];
+  for (const ses of sessions) {
+    try {
+      ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+    } catch (e) {}
+    try {
+      if (typeof ses.setPermissionCheckHandler === 'function') {
+        ses.setPermissionCheckHandler(() => false);
+      }
+    } catch (e) {}
+  }
+}
+
+installWebContentsGuards();
+
+function cancelTaskbarFlash(win) {
+  if (process.platform !== 'win32') return;
+  try {
+    if (win && !win.isDestroyed() && typeof win.flashFrame === 'function') {
+      win.flashFrame(false);
+    }
+  } catch (e) {}
+}
+
+function settleTaskbarAttention(win) {
+  if (process.platform !== 'win32') return;
+  cancelTaskbarFlash(win);
+  [120, 600, 1600].forEach((ms) => {
+    const timer = setTimeout(() => cancelTaskbarFlash(win), ms);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
 }
 
 // ---------- single instance (skipped for selftest runs) ----------
@@ -57,6 +181,7 @@ if (!SELFTEST) {
         if (win.isMinimized()) win.restore();
         win.show();
         win.focus();
+        settleTaskbarAttention(win);
       }
     });
   }
@@ -82,6 +207,7 @@ function createWindow() {
     transparent: true,
     resizable: false,
     backgroundColor: '#00000000',
+    icon: APP_ICON,
     show: true,
     webPreferences: {
       contextIsolation: true,
@@ -94,6 +220,9 @@ function createWindow() {
   });
 
   win.setMenuBarVisibility(false);
+  win.on('show', () => settleTaskbarAttention(win));
+  win.on('focus', () => settleTaskbarAttention(win));
+  settleTaskbarAttention(win);
 
   const file = rendererFile();
   if (!file) {
@@ -107,12 +236,6 @@ function createWindow() {
     // Note: space-separated values (--st-device foo) get mangled somewhere in
     // the npx/Git-Bash chain on Windows and crash Electron at startup; only
     // the --flag=value form is reliable, so that's what we parse.
-    const argValue = (flag) => {
-      const eq = argv.find((a) => a.startsWith(flag + '='));
-      if (eq) return eq.slice(flag.length + 1);
-      const i = argv.indexOf(flag);
-      return (i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('-')) ? argv[i + 1] : null;
-    };
     const selftestQuery = { selftest: selftestUrl };
     const dev = argValue('--st-device');
     if (dev) selftestQuery.device = dev;
@@ -184,17 +307,29 @@ async function runSelftest(win) {
       console.log('SELFTEST SHELL eval failed: ' + (e && e.message));
     }
 
-    // make sure the renderer actually attached the screen webview
     const state = ipc.getState();
+
+    // make sure the renderer actually attached the screen webview
     await waitFor(() => state.screenWC && !state.screenWC.isDestroyed(), 5000);
     if (state.screenWC && !state.screenWC.isDestroyed() && state.screenWC.isLoading()) {
       await waitFor(() => !state.screenWC.isLoading(), 8000);
       await delay(500);
     }
 
+    const requestedEngine = argValue('--st-engine') || 'chromium';
+    if (requestedEngine === 'webkit') {
+      const active = await waitFor(() => state.engineMode === 'webkit' && webkit.isActive(), 20000, 250);
+      if (!active) {
+        throw new Error('requested WebKit selftest but WebKit did not become active');
+      }
+      await delay(500);
+    }
+
     // evidence: emulation really applied inside the page
     let info = null;
-    if (state.screenWC && !state.screenWC.isDestroyed()) {
+    if (state.engineMode === 'webkit' && webkit.isActive()) {
+      info = await webkit.getEvidence();
+    } else if (state.screenWC && !state.screenWC.isDestroyed()) {
       try {
         info = await state.screenWC.executeJavaScript(
           '({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio,' +
@@ -205,7 +340,8 @@ async function runSelftest(win) {
       }
     }
     if (info) {
-      console.log('SELFTEST INFO innerWidth=' + info.w + ' innerHeight=' + info.h +
+      console.log('SELFTEST INFO engine=' + (info.engine || state.engineMode) +
+        ' innerWidth=' + info.w + ' innerHeight=' + info.h +
         ' dpr=' + info.dpr + ' platform=' + info.platform + ' maxTouchPoints=' + info.touch +
         ' standalone=' + info.standalone);
       console.log('SELFTEST INFO ua=' + info.ua);
@@ -254,6 +390,7 @@ async function runSelftest(win) {
         info,
         deviceArg: (argv.find((a) => a.startsWith('--st-device=')) || '').split('=')[1] || null,
         engineArg: (argv.find((a) => a.startsWith('--st-engine=')) || '').split('=')[1] || null,
+        engineMode: state.engineMode,
         ts: new Date().toISOString(),
       }, null, 2));
     } catch (_) {}
@@ -282,12 +419,27 @@ if (SELFTEST && !process.env.DEVPHONE_USERDATA) {
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // no menu bar, ever
+  configureSessionSecurity();
 
   ipc.init({ selftest: SELFTEST }); // handlers must exist before renderer runs
   const win = createWindow();
   ipc.setWindow(win);
 
   if (SELFTEST) runSelftest(win);
+
+  // v0.1.6: cloud auto-update — packaged installs check the GitHub releases
+  // feed and drive the custom in-app update UX (changelog → progress →
+  // celebration → restart). No-op in dev/selftest and on portable builds.
+  // (Supersedes the v0.1.5 local dist/ self-update; selfupdate.js is retained
+  // but no longer wired.)
+  if (!SELFTEST) {
+    try {
+      const cloudupdate = require('./cloudupdate');
+      cloudupdate.init({ send: ipc.send });
+      // Let the renderer subscribe to appupdate:event before the first check.
+      setTimeout(() => { try { cloudupdate.check(); } catch (e) {} }, 3000);
+    } catch (e) {}
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

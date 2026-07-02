@@ -8,3 +8,4 @@ galaxy.log
 st.log
 galaxy-test.log
 selftest.json
+build-info.json

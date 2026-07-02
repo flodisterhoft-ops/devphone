@@ -67,7 +67,8 @@
     addrBar: 'top',        // Chrome address bar position (global)
     inputMode: 'touch',    // 'touch' | 'mouse' (global)
     alwaysOnTop: false,    // window pinning (global)
-    contentViewport: null  // {width,height} of the honest content area (unscaled)
+    contentViewport: null, // {width,height} of the honest content area (unscaled)
+    clickThrough: false    // v0.1.5: cursor is over an INVISIBLE window region
   };
 
   /* ---------- tiny pub/sub ------------------------------------------------ */
@@ -548,6 +549,27 @@
     renderSettingsPopover();
   }
 
+  /* ---------- standalone WebKit preview window (v0.1.5) ------------------------
+     Opens the current page in a real, headed Playwright-WebKit window —
+     native interaction speed (no frame streaming), same device identity
+     (viewport/dpr/UA/shims) and the same persisted storage state, so
+     logins carry over both ways. Main reuses an already-open window.    */
+
+  function openWebkitWindow() {
+    toggleSettingsPopover(false);
+    var url = state.url || '';
+    if (!url || url === 'about:blank' || url.indexOf('data:') === 0) {
+      toast('Open a page first', 1800);
+      return;
+    }
+    toast('🧭 Opening WebKit window…', 1800);
+    invoke('webkit:window', { url: url }).then(function (res) {
+      if (!res || !res.ok) {
+        toast('WebKit window failed: ' + ((res && res.error) || 'unknown error'), 2600);
+      }
+    });
+  }
+
   /* ---------- settings popover ------------------------------------------------ */
 
   function renderSettingsPopover() {
@@ -572,6 +594,14 @@
     html += '<div class="set-sec">Window</div>' +
       '<button class="set-row" id="set-aot">📌 Always on top' +
         '<span class="set-check">' + (state.alwaysOnTop ? '✓' : '✗') + '</span>' +
+      '</button>';
+    html += '<div class="set-sec">Preview</div>' +
+      '<button class="set-row" id="set-wkwin">🧭 Open in WebKit window</button>' +
+      '<div class="set-note">Real WebKit, full speed — no phone frame</div>';
+    var ver = (window.devphone && devphone.version) || '';
+    html += '<div class="set-sec">About</div>' +
+      '<button class="set-row" id="set-update">🔄 Check for updates' +
+        (ver ? '<span class="set-check">v' + esc(ver) + '</span>' : '') +
       '</button>';
     pop.innerHTML = html;
   }
@@ -815,9 +845,13 @@
        hover → forwarded mouseMove (throttled) so :hover / the picker work
      In MOUSE input mode events are forwarded raw (down/move/up) — without
      touch emulation there is no capture trap, and text selection just works.
-     sendInputEvent coordinates: Electron ADDS the webview's window offset to
-     whatever we pass (arrival = sent + rect.left/top — verified empirically),
-     so forwarded coords are pre-compensated.                                */
+     sendInputEvent coordinates: plain guest-local CSS px. Electron 36 passes
+     them to the guest UNCHANGED (measured, scratch/probe-mousemode.js:
+     sent == arrival). The old E33-era "arrival = sent + rect offset"
+     pre-compensation shifted every forwarded event ~65px off-target — that
+     was mouse-mode clicks landing on the wrong element AND the touch-mode
+     hover highlight lighting up the wrong control (e.g. the Skycrew portal
+     cards) while the synthetic tap then hit the aimed one.                  */
 
   function guestBlurUnlessEditing() {
     var wv = el.page;
@@ -879,17 +913,9 @@
       try { wv.sendInputEvent(ev); } catch (e) {}
     }
 
-    // guest-LOCAL CSS px of a layer event, pre-compensated for the offset
-    // Electron adds to sendInputEvent coordinates (arrival = sent + rect.xy)
-    function fwdXY(e) {
-      var r = el.page.getBoundingClientRect();
-      var s = (el.page.offsetWidth ? r.width / el.page.offsetWidth : 1) || 1;
-      return {
-        x: Math.round((e.clientX - r.left) / s - r.left),
-        y: Math.round((e.clientY - r.top) / s - r.top)
-      };
-    }
-    // plain guest-local CSS px (for in-guest elementFromPoint)
+    // guest-local CSS px of a layer event — used both for sendInputEvent
+    // forwarding (E36 delivers coordinates unchanged) and for the in-guest
+    // elementFromPoint paths
     function localXY(e) {
       var r = el.page.getBoundingClientRect();
       var s = (el.page.offsetWidth ? r.width / el.page.offsetWidth : 1) || 1;
@@ -937,6 +963,152 @@
           }
         }).catch(function () {});
       } catch (e) {}
+    }
+
+    function readNativeSelectAt(local) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady || typeof wv.executeJavaScript !== 'function') {
+        return Promise.resolve(null);
+      }
+      var w = (state.contentViewport && state.contentViewport.width) ||
+              (state.device && state.device.viewport.width) || 0;
+      var js = '(function(x,y,w){try{' +
+        'var k=(w&&window.innerWidth)?(window.innerWidth/w):1;' +
+        'x=Math.round(x*k);y=Math.round(y*k);' +
+        'var el=document.elementFromPoint(x,y);' +
+        'for(var n=el;n&&n.tagName;n=n.parentElement){' +
+          'if(n.tagName==="SELECT"){' +
+            'if(n.disabled)return{kind:"select",disabled:true};' +
+            'var store=window.__DEVPHONE_SELECT_TARGETS__||(window.__DEVPHONE_SELECT_TARGETS__={});' +
+            'var id=n.__devphoneSelectId||(n.__devphoneSelectId=("sel-"+Date.now().toString(36)+"-"+Math.random().toString(36).slice(2)));' +
+            'store[id]=n;' +
+            'var clean=function(s){return String(s||"").replace(/\\s+/g," ").trim()};' +
+            'var label=clean(n.getAttribute("aria-label")||n.getAttribute("title")||"");' +
+            'if(!label&&n.id){var labs=document.querySelectorAll("label[for]");' +
+              'for(var i=0;i<labs.length;i++){if(labs[i].getAttribute("for")===n.id){label=clean(labs[i].textContent);break}}}' +
+            'if(!label){var wrap=n.closest&&n.closest("label");if(wrap)label=clean(wrap.textContent.replace(n.textContent,""))}' +
+            'if(!label)label=clean(n.name||"Select");' +
+            'var opts=[];for(var j=0;j<n.options.length&&opts.length<200;j++){' +
+              'var o=n.options[j],p=o.parentElement;' +
+              'if(o.hidden)continue;' +
+              'opts.push({index:j,text:clean(o.label||o.text||o.value),value:String(o.value||""),' +
+                'selected:!!o.selected,disabled:!!(o.disabled||(p&&p.tagName==="OPTGROUP"&&p.disabled)),' +
+                'group:(p&&p.tagName==="OPTGROUP")?clean(p.label):""});' +
+            '}' +
+            'return{kind:"select",id:id,label:label,multiple:!!n.multiple,selectedIndex:n.selectedIndex,options:opts};' +
+          '}' +
+        '}' +
+        'return null;' +
+      '}catch(e){return{kind:"error",error:String(e&&e.message||e)}}})(' +
+        local.x + ',' + local.y + ',' + w + ')';
+      try {
+        return Promise.resolve(wv.executeJavaScript(js)).catch(function () { return null; });
+      } catch (e) {
+        return Promise.resolve(null);
+      }
+    }
+
+    function closeNativeSelectPicker() {
+      var sheet = el.sheetLayer;
+      if (!sheet) return;
+      sheet.classList.remove('show');
+      sheet.classList.remove('native-select-open');
+      setTimeout(function () {
+        if (!sheet.classList.contains('show')) {
+          sheet.hidden = true;
+          sheet.innerHTML = '';
+        }
+      }, 220);
+    }
+
+    function commitNativeSelectChoice(info, optIndex, keepOpen, button) {
+      var wv = el.page;
+      if (!wv || !state.webviewReady || typeof wv.executeJavaScript !== 'function') return;
+      var js = '(function(id,idx){try{' +
+        'var store=window.__DEVPHONE_SELECT_TARGETS__||{};var sel=store[id];' +
+        'if(!sel||sel.tagName!=="SELECT")return{ok:false,error:"target missing"};' +
+        'var opt=sel.options[idx];if(!opt||opt.disabled)return{ok:false,error:"option unavailable"};' +
+        'var p=opt.parentElement;if(p&&p.tagName==="OPTGROUP"&&p.disabled)return{ok:false,error:"group disabled"};' +
+        'if(sel.multiple){opt.selected=!opt.selected}else{sel.selectedIndex=idx}' +
+        'sel.dispatchEvent(new Event("input",{bubbles:true}));' +
+        'sel.dispatchEvent(new Event("change",{bubbles:true}));' +
+        'return{ok:true,selected:!!opt.selected,value:sel.value};' +
+      '}catch(e){return{ok:false,error:String(e&&e.message||e)}}})(' +
+        JSON.stringify(info.id) + ',' + Number(optIndex) + ')';
+      try {
+        Promise.resolve(wv.executeJavaScript(js)).then(function (res) {
+          if (!res || res.ok === false) {
+            toast('Selection failed', 1800);
+            return;
+          }
+          if (keepOpen && button) {
+            button.classList.toggle('selected', !!res.selected);
+            var mark = button.querySelector('.ns-check');
+            if (mark) mark.innerHTML = res.selected ? '&#10003;' : '';
+          } else {
+            closeNativeSelectPicker();
+          }
+        }).catch(function () { toast('Selection failed', 1800); });
+      } catch (e) {
+        toast('Selection failed', 1800);
+      }
+    }
+
+    function openNativeSelectPicker(info) {
+      var sheet = el.sheetLayer;
+      if (!sheet || !info || !info.options || !info.options.length) return false;
+      var android = state.device && state.device.os === 'android';
+      var options = info.options.map(function (o) {
+        return '<button class="ns-option' + (o.selected ? ' selected' : '') + '" data-idx="' + o.index + '"' +
+          (o.disabled ? ' disabled' : '') + '>' +
+          '<span class="ns-text">' +
+            (o.group ? '<span class="ns-group">' + esc(o.group) + '</span>' : '') +
+            '<span>' + esc(o.text || o.value || 'Option') + '</span>' +
+          '</span>' +
+          '<span class="ns-check">' + (o.selected ? '&#10003;' : '') + '</span>' +
+        '</button>';
+      }).join('');
+      sheet.hidden = false;
+      sheet.classList.remove('show');
+      sheet.classList.add('native-select-open');
+      sheet.innerHTML =
+        '<div class="native-select-backdrop"></div>' +
+        '<div class="native-select ' + (android ? 'ns-android' : 'ns-ios') + '">' +
+          (android ? '' : '<div class="ns-grab"></div>') +
+          '<div class="ns-title">' + esc(info.label || 'Select') + '</div>' +
+          '<div class="ns-options">' + options + '</div>' +
+          (android ? '' : '<button class="ns-cancel">Cancel</button>') +
+        '</div>';
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () { sheet.classList.add('show'); });
+      });
+      var close = function (e) {
+        if (e) { e.preventDefault(); e.stopPropagation(); }
+        closeNativeSelectPicker();
+      };
+      var backdrop = sheet.querySelector('.native-select-backdrop');
+      if (backdrop) backdrop.addEventListener('click', close);
+      var cancel = sheet.querySelector('.ns-cancel');
+      if (cancel) cancel.addEventListener('click', close);
+      sheet.querySelectorAll('.ns-option').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          commitNativeSelectChoice(info, btn.getAttribute('data-idx'), !!info.multiple, btn);
+        });
+      });
+      try { el.page.blur(); } catch (e) {}
+      return true;
+    }
+
+    function tapGuest(local) {
+      readNativeSelectAt(local).then(function (info) {
+        if (info && info.kind === 'select') {
+          if (info.disabled) return;
+          if (openNativeSelectPicker(info)) return;
+        }
+        syntheticTap(local);
+      });
     }
 
     // synthetic in-guest scrolling (see the block comment above): find the
@@ -1058,25 +1230,51 @@
       });
     }
 
-    // wheel: coalesce a frame's worth of wheel deltas into ONE mouseWheel
-    // sample (DOM-signed deltas — positive deltaY scrolls content down,
-    // matching what the guest-side dispatch expects; see emulation.js).
-    var wheelAcc = null;
-    function queueNativeWheel(local, dx, dy) {
-      if (gestureBroken) { queueGuestScroll(local, dx, dy); return; }
-      if (wheelAcc) {
-        wheelAcc.x = local.x;
-        wheelAcc.y = local.y;
-        wheelAcc.dx += dx;
-        wheelAcc.dy += dy;
+    // wheel: per-frame EASED steps instead of raw ticks (DOM-signed deltas —
+    // positive deltaY scrolls content down; see emulation.js). A CDP
+    // mouseWheel applies its whole delta INSTANTLY — Chromium's own smooth
+    // wheel-scroll animation never runs for injected events — so forwarding
+    // a mouse wheel's ~100px ticks 1:1 landed as one visible jump per tick:
+    // the "choppy scrolling". The animator accumulates incoming deltas and
+    // drains them with an exponential ease-out (~28%/frame, ≥16px/frame),
+    // one small mouseWheel per frame, which reads like native smooth scroll.
+    // Distance is preserved exactly; new ticks fold into a running drain.
+    var wheelAnim = null;   // {x, y, rx, ry} remaining deltas at last point
+    function pumpWheel() {
+      var a = wheelAnim;
+      if (!a) return;
+      if (gestureBroken) {  // native path died mid-drain → recover the rest
+        wheelAnim = null;
+        if (Math.abs(a.rx) >= 0.5 || Math.abs(a.ry) >= 0.5) {
+          queueGuestScroll({ x: a.x, y: a.y }, a.rx, a.ry);
+        }
         return;
       }
-      wheelAcc = { phase: 'wheel', x: local.x, y: local.y, dx: dx, dy: dy, t: Date.now() };
-      requestAnimationFrame(function () {
-        var s = wheelAcc;
-        wheelAcc = null;
-        if (s && (Math.abs(s.dx) >= 0.5 || Math.abs(s.dy) >= 0.5)) queueSample(s, true);
-      });
+      var step = function (rest) {
+        var mag = Math.abs(rest);
+        if (mag < 0.5) return rest;               // final crumb, all at once
+        return (rest < 0 ? -1 : 1) * Math.min(mag, Math.max(16, mag * 0.28));
+      };
+      var dx = step(a.rx), dy = step(a.ry);
+      a.rx -= dx;
+      a.ry -= dy;
+      if (Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5) {
+        queueSample({ phase: 'wheel', x: a.x, y: a.y, dx: dx, dy: dy, t: Date.now() }, true);
+      }
+      if (Math.abs(a.rx) >= 0.5 || Math.abs(a.ry) >= 0.5) requestAnimationFrame(pumpWheel);
+      else wheelAnim = null;
+    }
+    function queueNativeWheel(local, dx, dy) {
+      if (gestureBroken) { queueGuestScroll(local, dx, dy); return; }
+      if (wheelAnim) {      // drain in progress — fold the new tick in
+        wheelAnim.x = local.x;
+        wheelAnim.y = local.y;
+        wheelAnim.rx += dx;
+        wheelAnim.ry += dy;
+        return;
+      }
+      wheelAnim = { x: local.x, y: local.y, rx: dx, ry: dy };
+      pumpWheel();          // first step ships NOW — no added latency
     }
 
     // coalesce per-pointermove deltas into ~16ms batches (one in-guest eval
@@ -1115,7 +1313,7 @@
         if (press.drag && !gestureBroken) {
           queueSample({ phase: 'cancel', x: press.lastX, y: press.lastY, t: Date.now() }, true);
         } else if (press.mouse) {
-          var mu = fwdXY(e);
+          var mu = localXY(e);
           sendToGuest({ type: 'mouseUp', x: mu.x, y: mu.y, button: 'left', clickCount: 1 });
         }
         press = null;
@@ -1124,7 +1322,7 @@
       try { layer.setPointerCapture(e.pointerId); } catch (err) {}
       if (state.inputMode === 'mouse') {
         press = { mouse: true };
-        var p = fwdXY(e);
+        var p = localXY(e);
         sendToGuest({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
         return;
       }
@@ -1148,12 +1346,12 @@
         var now = Date.now();
         if (now - lastHover < 25) return;
         lastHover = now;
-        var h = fwdXY(e);
+        var h = localXY(e);
         sendToGuest({ type: 'mouseMove', x: h.x, y: h.y });
         return;
       }
       if (press.mouse) {
-        var m = fwdXY(e);
+        var m = localXY(e);
         sendToGuest({ type: 'mouseMove', x: m.x, y: m.y, button: 'left', modifiers: ['leftButtonDown'] });
         return;
       }
@@ -1190,11 +1388,11 @@
       var tap = !wasMouse && movedPx < 8 && dt < 700;
       press = null;
       if (wasMouse) {
-        var p = fwdXY(e);
+        var p = localXY(e);
         sendToGuest({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
         return;   // mouse mode: no touch emulation → no capture trap
       }
-      if (tap) { syntheticTap(localXY(e)); return; }   // taps stay synthetic
+      if (tap) { tapGuest(localXY(e)); return; }   // select taps get a native-style picker
       if (wasDrag && !gestureBroken) {
         // terminate the native touch sequence NOW (flushed immediately) —
         // Chromium computes the fling velocity at this exact moment
@@ -1279,6 +1477,15 @@
       if (action === 'back') wv.goBack();
       else if (action === 'forward') wv.goForward();
       else if (action === 'reload') wv.reload();
+      else if (action === 'hardReload') {
+        invoke('nav', { action: 'hardReload' }).then(function (res) {
+          if (res && res.ok !== false) return;
+          try {
+            if (typeof wv.reloadIgnoringCache === 'function') wv.reloadIgnoringCache();
+            else wv.reload();
+          } catch (e) { console.warn('[DevPhone] hard reload fallback failed', e); }
+        });
+      }
     } catch (e) { console.warn('[DevPhone] navAction ' + action + ' failed', e); }
   }
 
@@ -1598,6 +1805,8 @@
 
     if (el.settingsPopover) el.settingsPopover.addEventListener('click', function (e) {
       if (e.target.closest('#set-aot')) { setAlwaysOnTop(!state.alwaysOnTop); return; }
+      if (e.target.closest('#set-wkwin')) { openWebkitWindow(); return; }
+      if (e.target.closest('#set-update')) { toggleSettingsPopover(false); if (window.dpUpdate) dpUpdate.check(); return; }
       var btn = e.target.closest('.set-seg button');
       if (!btn) return;
       var seg = btn.parentElement.getAttribute('data-set');
@@ -1650,8 +1859,106 @@
         e.preventDefault(); togglePicker();
       } else if (e.ctrlKey && e.shiftKey && (e.key === 'S' || e.key === 's')) {
         e.preventDefault(); takeShot('screen');
+      } else if (e.ctrlKey && e.shiftKey && (e.key === 'R' || e.key === 'r')) {
+        e.preventDefault(); navAction('hardReload');
       }
     });
+  }
+
+  /* ---------- click-through over invisible regions (v0.1.5) --------------------
+     The OS window is a big transparent rectangle: phone + shadow margin +
+     gap + rail + the MIN_WIN_H slack above/below. Those invisible areas used
+     to swallow clicks (and drag the window), blocking whatever sits behind
+     DevPhone. Now the window ignores mouse events whenever the cursor is
+     over nothing visible — clicks land on the window BEHIND, exactly like
+     clicking beside any normal app. setIgnoreMouseEvents({forward:true})
+     keeps mousemoves flowing while ignored, so the shell can re-arm itself
+     the moment the cursor reaches the phone or the rail.
+     Rules:
+       · popover / context-menu open → whole window stays interactive (the
+         click-catcher modality needs the outside click to CLOSE the menu)
+       · a button is held (e.buttons) → no state change mid-press/drag
+       · visible = #phone-wrap, the rail, popovers, ctx menu               */
+
+  function wireClickThrough() {
+    function overVisible(x, y) {
+      // The auto-update popup (update.js) is a full-window modal — keep the
+      // whole window interactive while it's up so its buttons are clickable.
+      var dpu = document.getElementById('dpu-overlay');
+      if (dpu && !dpu.hidden) return true;
+      if (anyPopoverOpen()) return true;
+      if (el.clickCatcher && !el.clickCatcher.hidden) return true;
+      if (el.ctxMenu && !el.ctxMenu.hidden) return true;
+      var n = document.elementFromPoint(x, y);
+      if (!n || !n.closest) return false;
+      return !!(n.closest('#phone-wrap') || n.closest('#sidebar-controls') ||
+                n.closest('#device-popover') || n.closest('#settings-popover') ||
+                n.closest('#ctx-menu'));
+    }
+    function apply(on) {
+      if (state.clickThrough === on) return;
+      state.clickThrough = on;
+      invoke('shell:ignoreMouse', { on: on });
+    }
+    window.addEventListener('mousemove', function (e) {
+      if (e.buttons) return;   // mid-press/drag — never flip while held
+      apply(!overVisible(e.clientX, e.clientY));
+    }, { passive: true });
+    // safety: anything that opens UI re-arms the window immediately
+    window.addEventListener('mousedown', function () { apply(false); }, true);
+  }
+
+  /* ---------- bezel window drag (v0.1.5) ---------------------------------------
+     Grab the phone FRAME anywhere to move the window. The bezel can't be a
+     CSS app-region: drag regions are HTCAPTION on Windows, which swallows
+     bezel right-clicks (the v0.1.3 context-menu lesson). So the drag is
+     manual: pointer capture on #phone, per-frame screen-coordinate deltas →
+     shell:drag IPC → win.setPosition in main. The page area (#screen) and
+     the home button keep their own behavior; the #stage shadow margin stays
+     an app-region drag area as before.                                      */
+
+  function wirePhoneDrag() {
+    var ph = el.phone;
+    if (!ph) return;
+    var dragging = false;
+    var scheduled = false;
+
+    // NO coordinates in the pings: main samples the OS cursor itself
+    // (screen.getCursorScreenPoint — ground truth). Event screenX/Y are
+    // computed against a window origin that lags our own moves, and that
+    // feedback made the phone slowly slide out from under the cursor on
+    // long back-and-forth drags (v0.1.5 drift bug).
+    function sendMove() {
+      scheduled = false;
+      if (!dragging) return;
+      invoke('shell:drag', { phase: 'move' });
+    }
+
+    ph.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || dragging) return;
+      // bezel/frame only — presses on the screen content (touch layer, bars,
+      // home screen) and the SE home button are not window drags
+      if (e.target.closest && (e.target.closest('#screen') || e.target.closest('#hw-home-button'))) return;
+      dragging = true;
+      document.body.classList.add('win-dragging');
+      try { ph.setPointerCapture(e.pointerId); } catch (err) {}
+      invoke('shell:drag', { phase: 'start' });
+    });
+    ph.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      if (!scheduled) {
+        scheduled = true;
+        requestAnimationFrame(sendMove);
+      }
+    });
+    function endDrag() {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('win-dragging');
+      invoke('shell:drag', { phase: 'end' });
+    }
+    ph.addEventListener('pointerup', endDrag);
+    ph.addEventListener('pointercancel', endDrag);
   }
 
   /* ---------- bezel context menu ----------------------------------------------
@@ -1815,6 +2122,9 @@
     //     active, so the first click lands.
     var lastMove = 0;
     function activateIfNeeded() {
+      // v0.1.5: never steal focus while the cursor is over an INVISIBLE
+      // region — the user is working with the window behind DevPhone there.
+      if (state.clickThrough) return;
       if (!document.hasFocus()) invoke('shell:activate');
     }
     window.addEventListener('mousemove', function () {
@@ -1946,6 +2256,8 @@
     wireGesture();
     wireEngineEvents();
     wireFocusFixes();
+    wirePhoneDrag();
+    wireClickThrough();
     wireCtxMenu();
     renderNavbar();
     startClock();

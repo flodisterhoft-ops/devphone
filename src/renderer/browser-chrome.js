@@ -194,6 +194,7 @@
           '</div>' +
           '<button class="menu-item" id="chr-newtab">New tab</button>' +
           '<button class="menu-item" id="chr-a2hs">Add to Home screen</button>' +
+          '<button class="menu-item" id="chr-hardreload">Hard refresh</button>' +
           '<button class="menu-item" id="chr-addrbar">' +
             (bottom ? 'Move address bar to top' : 'Move address bar to bottom') + '</button>' +
           '<button class="menu-item" id="chr-copy">Copy link</button>' +
@@ -218,6 +219,7 @@
     });
     $('chr-newtab').addEventListener('click', function () { hideMenus(); showStart('chrome'); });
     $('chr-a2hs').addEventListener('click', function () { hideMenus(); beginAddToHome('chrome'); });
+    $('chr-hardreload').addEventListener('click', hardRefresh);
     $('chr-addrbar').addEventListener('click', function () {
       hideMenus();
       if (DP.settings && DP.settings.setAddrBar) {
@@ -250,6 +252,7 @@
         '</div>' +
         '<div class="menu-pop sam-menu-pop" id="sam-menu-pop" hidden>' +
           '<button class="menu-item" id="sam-a2hs">Add page to → Home screen</button>' +
+          '<button class="menu-item" id="sam-hardreload">Hard refresh</button>' +
           '<button class="menu-item" id="sam-copy">Copy link</button>' +
           '<button class="menu-item" id="sam-ext">Open in system browser</button>' +
         '</div>' +
@@ -268,6 +271,7 @@
     });
     wireMenuCatcher();
     $('sam-a2hs').addEventListener('click', function () { hideMenus(); beginAddToHome('samsung'); });
+    $('sam-hardreload').addEventListener('click', hardRefresh);
     $('sam-copy').addEventListener('click', function () { hideMenus(); copyLink(); });
     $('sam-ext').addEventListener('click', function () {
       hideMenus();
@@ -350,6 +354,13 @@
         function () { DP.toast('⚠️ Copy failed'); }
       );
     } catch (e) { DP.toast('⚠️ Copy failed'); }
+  }
+
+  function hardRefresh() {
+    hideMenus();
+    if (!DP.state.url || !isWeb(DP.state.url)) { DP.toast('Open a website first'); return; }
+    DP.navAction('hardReload');
+    DP.toast('Hard refresh', 1600);
   }
 
   /* ---------- inline URL editing ---------------------------------------------------- */
@@ -574,12 +585,14 @@
         '<div class="sheet-actions">' +
           '<button id="sh-a2hs">Add to Home Screen <span class="ic">' + svgPlusSquare() + '</span></button>' +
           '<button id="sh-copy">Copy Link <span class="ic">' + svgCopy() + '</span></button>' +
+          '<button id="sh-hardreload">Hard Refresh <span class="ic">' + svgReload(19) + '</span></button>' +
           '<button id="sh-ext">Open in System Browser <span class="ic">' + svgExternal() + '</span></button>' +
         '</div>' +
         '<button class="sheet-cancel" id="sh-cancel">Cancel</button>' +
       '</div>');
     layer.querySelector('#sh-cancel').addEventListener('click', closeSheet);
     layer.querySelector('#sh-copy').addEventListener('click', function () { closeSheet(); copyLink(); });
+    layer.querySelector('#sh-hardreload').addEventListener('click', function () { closeSheet(); hardRefresh(); });
     layer.querySelector('#sh-ext').addEventListener('click', function () {
       closeSheet();
       DP.invoke('open:external', { url: DP.state.url });
@@ -663,9 +676,11 @@
         addedAt: Date.now()
       };
       closeSheet();
-      if (DP.home) DP.home.installApp(app);
-      DP.toast('✅ Added to Home Screen', 2200);
-      setTimeout(function () { DP.goHome(); }, 350);
+      var installed = DP.home && DP.home.installApp(app);
+      if (installed) {
+        DP.toast('✅ Added to Home Screen', 2200);
+        setTimeout(function () { DP.goHome(); }, 350);
+      }
     });
   }
 

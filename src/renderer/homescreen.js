@@ -204,12 +204,18 @@
     catch (e) { return []; }
   }
   function saveApps(list) {
-    try { localStorage.setItem(appsKey(), JSON.stringify(list)); } catch (e) {}
+    try {
+      localStorage.setItem(appsKey(), JSON.stringify(list));
+      return true;
+    } catch (e) {
+      if (DP.toast) DP.toast('Could not save Home Screen app', 2400);
+      return false;
+    }
   }
   function installApp(app) {
     var list = getApps().filter(function (a) { return a.startUrl !== app.startUrl; });
     list.push(app);
-    saveApps(list);
+    if (!saveApps(list)) return null;
     render();
     return app;
   }

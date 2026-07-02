@@ -52,8 +52,9 @@ input[type="text"], input[type="search"], input[type="url"], input:not([type]) {
   align-items: center;
   gap: 12px;
   padding: var(--stage-pad);
-  /* the shadow margin doubles as window-drag area */
-  -webkit-app-region: drag;
+  /* v0.1.5: NOT a drag area anymore — the invisible margin is click-through
+     (wireClickThrough: mouse events over it fall through to whatever window
+     is behind). Dragging lives on the phone frame (wirePhoneDrag) + rail. */
 }
 
 /* ---------- cursor scoping -------------------------------------------------
@@ -405,6 +406,13 @@ body.engine-webkit #touch-layer { display: none; }
 /* recents flourish (cosmetic) */
 #screen { transition: transform 0.18s ease; }
 #screen.recents-anim { transform: scale(0.86); }
+
+/* v0.1.5: the phone frame drags the window (manual pointer drag, not an
+   app-region — see wirePhoneDrag). Grab affordance on the bezel only; the
+   screen subtree resets the inherited cursor so page/bars keep their own. */
+#phone { cursor: grab; }
+#screen { cursor: default; }
+body.win-dragging #phone { cursor: grabbing; }
 
 /* picker armed → shell side shows a plain arrow like the in-page cursor */
 body.picker-on #screen, body.picker-on #screen * { cursor: default !important; }
@@ -1097,6 +1105,146 @@ body.android-standalone #statusbar .sb-android {
 }
 #sheet-layer.show .sheet-backdrop { opacity: 1; }
 
+.native-select-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.34);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+#sheet-layer.show .native-select-backdrop { opacity: 1; }
+
+.native-select {
+  color: #111;
+  overflow: hidden;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.28);
+}
+.native-select .ns-title {
+  padding: 13px 16px 11px;
+  font-size: 15px;
+  font-weight: 650;
+  color: #4b4b52;
+  text-align: center;
+  border-bottom: 0.5px solid rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.native-select .ns-options {
+  max-height: min(52vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.native-select .ns-options::-webkit-scrollbar { display: none; }
+.ns-option {
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 15px;
+  color: #111;
+  font-size: 16px;
+  text-align: left;
+}
+.ns-option + .ns-option { border-top: 0.5px solid rgba(0, 0, 0, 0.08); }
+.ns-option:active { background: rgba(0, 0, 0, 0.06); }
+.ns-option[disabled] { opacity: 0.42; cursor: default; }
+.ns-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ns-text span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ns-group {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #85858d;
+}
+.ns-check {
+  flex: none;
+  width: 24px;
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.ns-ios {
+  position: absolute;
+  left: 8px; right: 8px; bottom: 8px;
+  border-radius: 17px;
+  background: #f4f4f6;
+  font-family: var(--font-ios);
+  transform: translateY(108%);
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0.33, 1);
+}
+#sheet-layer.show .ns-ios { transform: none; }
+.ns-ios .ns-grab {
+  width: 36px; height: 5px;
+  border-radius: 3px;
+  background: #c9c9ce;
+  margin: 7px auto 4px;
+}
+.ns-ios .ns-title { padding-top: 8px; }
+.ns-ios .ns-options {
+  margin: 0 8px 8px;
+  border-radius: 13px;
+  background: #fff;
+}
+.ns-ios .ns-cancel {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 0 8px 8px;
+  min-height: 48px;
+  border: 0;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.ns-android {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(310px, calc(100% - 48px));
+  max-height: min(72vh, 480px);
+  border-radius: 22px;
+  background: #fff;
+  font-family: var(--font-android);
+  opacity: 0;
+  transform: translate(-50%, -48%) scale(0.96);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+#sheet-layer.show .ns-android {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.ns-android .ns-title {
+  text-align: left;
+  color: #1f1f1f;
+  font-size: 17px;
+  padding: 18px 22px 10px;
+  border-bottom: 0;
+}
+.ns-android .ns-option {
+  min-height: 48px;
+  padding: 12px 22px;
+  font-size: 15px;
+}
+.ns-android .ns-option + .ns-option { border-top: 0; }
+
 .sheet {
   position: absolute;
   left: 8px; right: 8px; bottom: 8px;
@@ -1275,3 +1423,84 @@ body.android-standalone #statusbar .sb-android {
 .toast.show { opacity: 1; transform: none; }
 /* quick fade-out (picker "Copied to clipboard" & friends) */
 .toast.hide { opacity: 0; transform: translateY(6px); transition-duration: 0.15s; }
+
+/* ---------- auto-update popup (update.js, v0.1.6) ------------------------- */
+
+#dpu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 6000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ios);
+}
+#dpu-overlay[hidden] { display: none; }
+.dpu-backdrop {
+  position: absolute; inset: 0; z-index: 0;
+  background: rgba(10, 12, 20, 0.6);
+  backdrop-filter: blur(4px);
+}
+.dpu-confetti {
+  position: absolute; inset: 0; z-index: 1;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.dpu-card {
+  position: relative; z-index: 2;
+  width: 360px; max-width: calc(100vw - 40px);
+  background: linear-gradient(180deg, #1b1c26, #131320);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 22px;
+  box-shadow: 0 26px 64px rgba(0, 0, 0, 0.6);
+  padding: 22px;
+  color: #eef1fb;
+  animation: dpu-pop 0.34s cubic-bezier(0.2, 0.9, 0.3, 1.25);
+}
+.dpu-card.dpu-poof { animation: dpu-poof 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.25); }
+
+.dpu-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.dpu-appicon { width: 54px; height: 54px; flex-shrink: 0; filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.45)); }
+.dpu-appicon svg { width: 100%; height: 100%; display: block; }
+.dpu-title { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.dpu-ver { font-size: 12.5px; color: #9aa2c0; margin-top: 3px; }
+
+.dpu-whatsnew {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.09em; color: #7f88ad; margin-bottom: 10px;
+}
+.dpu-changelog { list-style: none; display: flex; flex-direction: column; gap: 9px; max-height: 220px; overflow-y: auto; padding-right: 4px; }
+.dpu-changelog li { display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45; color: #d7dcef; }
+.dpu-dot { width: 7px; height: 7px; margin-top: 5px; flex-shrink: 0; border-radius: 50%; background: linear-gradient(180deg, #22D3EE, #6366F1); }
+.dpu-changelog::-webkit-scrollbar { width: 6px; }
+.dpu-changelog::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
+
+.dpu-bar { height: 12px; border-radius: 7px; background: rgba(255, 255, 255, 0.10); overflow: hidden; margin: 6px 0 12px; }
+.dpu-bar-fill {
+  height: 100%; width: 0; border-radius: 7px;
+  background: linear-gradient(90deg, #22D3EE, #6366F1, #8B5CF6);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.55);
+  transition: width 0.25s ease;
+}
+.dpu-progmeta { display: flex; justify-content: space-between; font-size: 12.5px; color: #9aa2c0; }
+.dpu-pct { font-weight: 600; color: #d9e2ff; }
+
+.dpu-done { text-align: center; padding: 6px 0 2px; }
+.dpu-done-emoji { font-size: 46px; line-height: 1; margin-bottom: 8px; }
+.dpu-done-sub { font-size: 14px; color: #cdd3e6; }
+
+.dpu-actions { display: flex; gap: 10px; margin-top: 20px; }
+.dpu-btn {
+  flex: 1; height: 44px; border: none; border-radius: 13px;
+  font-size: 14.5px; font-weight: 600; font-family: var(--font-ios);
+  transition: filter 0.15s, background 0.15s, transform 0.05s;
+}
+.dpu-btn:active { transform: scale(0.98); }
+.dpu-later { background: rgba(255, 255, 255, 0.08); color: #cbd1e6; }
+.dpu-later:hover { background: rgba(255, 255, 255, 0.14); }
+.dpu-primary { background: linear-gradient(135deg, #6366F1, #8B5CF6); color: #fff; box-shadow: 0 8px 20px rgba(124, 58, 237, 0.42); }
+.dpu-primary:hover { filter: brightness(1.08); }
+.dpu-btn[hidden] { display: none; }
+
+@keyframes dpu-pop { from { opacity: 0; transform: translateY(10px) scale(0.94); } to { opacity: 1; transform: none; } }
+@keyframes dpu-poof { 0% { transform: scale(0.9); } 55% { transform: scale(1.04); } 100% { transform: scale(1); } }

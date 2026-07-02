@@ -10,7 +10,7 @@
  * across the IPC boundary.
  */
 
-const { ipcMain, webContents, shell } = require('electron');
+const { app, ipcMain, webContents, shell, screen } = require('electron');
 
 const emulation = require('./emulation');
 const webkit = require('./webkit');
@@ -31,12 +31,22 @@ const state = {
   selftest: false,
   inputMode: 'touch', // 'touch' | 'mouse' (v0.1.1) — re-applied on every emulation pass
   viewportOverride: null, // {width,height} content viewport (v0.1.1) or null = device viewport
+  mouseIgnored: false, // v0.1.5: click-through state (shell:ignoreMouse)
 };
 
 function send(channel, payload) {
   try {
     const win = state.shellWindow;
     if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+  } catch (e) {}
+}
+
+function cancelTaskbarFlash(win) {
+  if (process.platform !== 'win32') return;
+  try {
+    if (win && !win.isDestroyed() && typeof win.flashFrame === 'function') {
+      win.flashFrame(false);
+    }
   } catch (e) {}
 }
 
@@ -172,6 +182,20 @@ function init(options) {
         if (wc.navigationHistory && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
       } else if (action === 'reload') {
         wc.reload();
+      } else if (action === 'hardReload') {
+        try {
+          if (wc.session && typeof wc.session.clearCache === 'function') {
+            await wc.session.clearCache();
+          }
+        } catch (e) {}
+        try {
+          if (wc.debugger && wc.debugger.isAttached()) {
+            await wc.debugger.sendCommand('Network.clearBrowserCache');
+          }
+        } catch (e) {}
+        state.currentUrl = (typeof wc.getURL === 'function' && wc.getURL()) || state.currentUrl;
+        if (typeof wc.reloadIgnoringCache === 'function') wc.reloadIgnoringCache();
+        else wc.reload();
       } else {
         return { ok: false, error: 'unknown nav action: ' + action };
       }
@@ -221,6 +245,16 @@ function init(options) {
     return webkit.input(input);
   });
 
+  // v0.1.5: standalone headed WebKit window — full-speed real-WebKit preview
+  // of the current page (no frame streaming). The renderer passes its own
+  // current URL since main's state.currentUrl can lag in chromium mode.
+  handle('webkit:window', async (payload) => {
+    const device = ensureDevice();
+    if (!device) return { ok: false, error: 'no device available' };
+    const url = (payload && payload.url) || state.currentUrl;
+    return webkit.openWindow({ device, url });
+  });
+
   // v0.1.4: native drag/wheel replay on the GUEST debugger (chromium engine).
   // Batched samples {phase:'start'|'move'|'end'|'cancel'|'wheel', x, y, t,
   // dx?, dy?} are dispatched as Input.dispatchTouchEvent / mouseWheel — real
@@ -240,13 +274,11 @@ function init(options) {
     const w = Math.max(1, Math.round(Number(width) || 0));
     const h = Math.max(1, Math.round(Number(height) || 0));
     if (!w || !h) return { ok: false, error: 'bad size ' + width + 'x' + height };
-    try {
-      // resizable:false blocks user resizing; allow it briefly for our own.
-      win.setResizable(true);
-      win.setSize(w, h);
-    } finally {
-      try { win.setResizable(false); } catch (e) {}
-    }
+    // setBounds applies a new size on resizable:false directly (measured,
+    // probe-setbounds.js) — the old setResizable(true)…(false) toggle made
+    // Windows 11 blink its window border around the transparent rectangle.
+    const b = win.getBounds();
+    win.setBounds({ x: b.x, y: b.y, width: w, height: h });
     return { ok: true, width: w, height: h };
   });
 
@@ -255,7 +287,80 @@ function init(options) {
   // activating click is no longer eaten. No moveTop/alwaysOnTop games.
   handle('shell:activate', async () => {
     const win = state.shellWindow;
-    if (win && !win.isDestroyed() && !win.isFocused()) win.focus();
+    if (win && !win.isDestroyed() && !win.isFocused()) {
+      win.focus();
+      cancelTaskbarFlash(win);
+    }
+    return { ok: true };
+  });
+
+  // v0.1.5: click-through for the window's INVISIBLE regions. The window is
+  // a big transparent rectangle (phone + shadow margin + gap + rail + min
+  // height); whenever the cursor is over nothing visible the renderer turns
+  // mouse-ignoring ON ({forward:true} keeps mousemoves flowing so it can
+  // turn it back OFF when the cursor reaches the phone/rail) — clicks in
+  // the empty area land on whatever window is BEHIND DevPhone.
+  handle('shell:ignoreMouse', async ({ on }) => {
+    const win = state.shellWindow;
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no shell window' };
+    win.setIgnoreMouseEvents(!!on, { forward: true });
+    state.mouseIgnored = !!on;
+    win.__mouseIgnored = !!on; // test hook: BrowserWindow has no getter for this
+    return { ok: true, on: !!on };
+  });
+
+  // v0.1.5: manual window drag from the phone bezel. The bezel can NOT be a
+  // CSS app-region (drag regions are HTCAPTION on Windows and swallow bezel
+  // right-clicks — the v0.1.3 context-menu lesson), so the renderer pings
+  // start/move/end and MAIN derives the motion.
+  //
+  // Coordinates come from screen.getCursorScreenPoint() — OS ground truth in
+  // integer DIPs, the same space as window bounds. They must NOT come from
+  // the renderer's event screenX/Y: those are computed against a window
+  // origin that lags our own moves during the drag, and the feedback
+  // accumulated — measurably, the phone slid DOWN out of the grab cursor on
+  // longer back-and-forth drags. Anchor-based ground truth cannot drift:
+  // returning the cursor to its press point returns the window exactly to
+  // its press bounds. Explicit {x,y} is still honored so the deterministic
+  // suite can drive the handler without moving the real cursor.
+  //
+  // setBounds (not setPosition) with the ANCHORED size: on scaled displays
+  // a bare position move can re-round the size of this resizable:false
+  // window, and a 1px size wobble per move also reads as drift.
+  let dragAnchor = null;
+  handle('shell:drag', async ({ phase, x, y }) => {
+    const win = state.shellWindow;
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no shell window' };
+    const cur = (typeof x === 'number' && typeof y === 'number')
+      ? { x: Math.round(x), y: Math.round(y) }
+      : screen.getCursorScreenPoint();
+    if (phase === 'start') {
+      const b = win.getBounds();
+      dragAnchor = { bx: b.x, by: b.y, bw: b.width, bh: b.height, x: cur.x, y: cur.y, lx: b.x, ly: b.y };
+      return { ok: true };
+    }
+    if (phase === 'move') {
+      if (!dragAnchor) return { ok: false, error: 'no drag in progress' };
+      const nx = dragAnchor.bx + (cur.x - dragAnchor.x);
+      const ny = dragAnchor.by + (cur.y - dragAnchor.y);
+      if (nx !== dragAnchor.lx || ny !== dragAnchor.ly) {
+        dragAnchor.lx = nx;
+        dragAnchor.ly = ny;
+        // ONE setBounds with the ANCHORED size — no style toggles, ever.
+        // Measured on this machine (150% display scale, probe-setbounds.js):
+        //   · setPosition GROWS a resizable:false window ~1px per call
+        //     (DIP→physical→DIP re-rounding) — the phone visibly snapped at
+        //     drag release when a restore corrected the accumulation
+        //   · per-move setResizable toggles made Windows 11 blink its border
+        //     around the transparent window rectangle
+        //   · setBounds WITH size applies cleanly on resizable:false (the
+        //     old "size writes are blocked" assumption is false on E36/win32)
+        //     and holds bounds exactly: zero drift, zero restyling
+        win.setBounds({ x: nx, y: ny, width: dragAnchor.bw, height: dragAnchor.bh });
+      }
+      return { ok: true };
+    }
+    dragAnchor = null; // 'end' / 'cancel' — size never drifted, nothing to restore
     return { ok: true };
   });
 
@@ -306,6 +411,12 @@ function init(options) {
 
   ipcMain.on('screen:shims', (event) => {
     event.returnValue = emulation.getShimSource();
+  });
+
+  // v0.1.6: current app version for the shell (Settings → About). Sync so the
+  // preload can expose it as a plain value at load.
+  ipcMain.on('app:version', (event) => {
+    try { event.returnValue = app.getVersion(); } catch (e) { event.returnValue = ''; }
   });
 }
 

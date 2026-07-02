@@ -1,0 +1,60 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6366F1"/>
+      <stop offset="0.5" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#A855F7"/>
+    </linearGradient>
+    <radialGradient id="bgGlow" cx="0.32" cy="0.22" r="0.85">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.30"/>
+      <stop offset="0.55" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="bgShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0.55" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.16"/>
+    </linearGradient>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#33333A"/>
+      <stop offset="1" stop-color="#141417"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E7E9EE"/>
+      <stop offset="0.5" stop-color="#9AA0AB"/>
+      <stop offset="1" stop-color="#E7E9EE"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22D3EE"/>
+      <stop offset="0.52" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#818CF8"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.20"/>
+      <stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="drop" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <!-- app-icon squircle -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bgGlow)"/>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bgShade)"/>
+
+  <!-- phone -->
+  <g filter="url(#drop)">
+    <!-- side buttons -->
+    <rect x="73" y="90" width="3" height="15" rx="1.5" fill="#2A2A30"/>
+    <rect x="73" y="109" width="3" height="15" rx="1.5" fill="#2A2A30"/>
+    <rect x="180" y="96" width="3" height="26" rx="1.5" fill="#2A2A30"/>
+    <!-- body -->
+    <rect x="76" y="30" width="104" height="196" rx="27" fill="url(#body)" stroke="url(#rim)" stroke-width="2"/>
+    <!-- screen -->
+    <rect x="83" y="38" width="90" height="180" rx="20" fill="url(#screen)"/>
+    <rect x="83" y="38" width="90" height="180" rx="20" fill="url(#glass)"/>
+    <!-- dynamic island -->
+    <rect x="111" y="47" width="34" height="11" rx="5.5" fill="#0A0A0C"/>
+    <!-- home indicator -->
+    <rect x="112" y="205" width="32" height="4.5" rx="2.25" fill="#FFFFFF" fill-opacity="0.55"/>
+  </g>
+</svg>

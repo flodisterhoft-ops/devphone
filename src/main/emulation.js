@@ -194,12 +194,13 @@ function computeInsets(device) {
 // hardware cutouts either way) — the parameter exists so standalone:set can
 // re-apply and so future modes may differ.
 //
-// VERDICT (measured, scratch/test-safearea.js): Emulation.setSafeAreaInsetsOverride
-// does NOT exist in Chromium 130 (Electron 33) — "method wasn't found" — and no
-// setDeviceMetricsOverride variant plumbs env(safe-area-inset-*). The command
-// first ships in Chromium 136 → Electron 36+. This function stays a safe no-op
-// until then; the nested {insets:{top,topMax,...}} shape below matches the
-// Chromium 136 protocol definition.
+// VERDICT (measured, scratch/test-safearea.js + test-safearea-devices.js,
+// Electron 36.9.5 / Chromium 136.0.7103.177): Emulation.setSafeAreaInsetsOverride
+// EXISTS and WORKS in the nested {insets:{top,topMax,...}} shape — env(safe-
+// area-inset-*) reports the table values above, survives reload and later
+// setDeviceMetricsOverride calls. The flat {top,...} shape is rejected
+// ("Invalid parameters"), so the nested send below must stay first. On older
+// Chromium (<136) both sends fail and this degrades to the warn-once no-op.
 let safeAreaSupported = null; // null = not probed yet, then true/false
 
 async function applySafeArea(wc, device, standalone) {
@@ -322,7 +323,7 @@ async function applyDevice(wc, device, options) {
     }
   }
 
-  // Safe areas — single source of truth; no-op until Chromium ≥136 (see applySafeArea).
+  // Safe areas — single source of truth; live on Chromium ≥136 (see applySafeArea).
   await applySafeArea(wc, device, standalone);
 
   await cdp('Emulation.setEmulatedMedia', {
@@ -441,9 +442,14 @@ function dispatchGesture(wc, samples) {
   const run = gestureChain.then(async () => {
     if (wc.isDestroyed()) return { ok: false, error: 'webContents destroyed' };
     if (!wc.debugger.isAttached()) return { ok: false, error: 'debugger not attached' };
-    for (const s of samples) {
-      await dispatchGestureSample(wc, s); // sequential — order is everything
-    }
+    // PIPELINED, not awaited one-by-one: every CDP input ack waits for the
+    // guest main thread to process the event, so sequential awaits throttled
+    // move delivery to one guest-frame per sample — drags stuttered on any
+    // page doing work. All sends are issued synchronously here (the debugger
+    // session serializes them in send order, so touchStart/move/end order
+    // still holds); the batch resolves when the last ack lands.
+    const acks = samples.map((s) => dispatchGestureSample(wc, s));
+    await Promise.all(acks);
     return { ok: true, dispatched: samples.length };
   }).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
   gestureChain = run.then(() => {}); // a failed batch never sticks the chain

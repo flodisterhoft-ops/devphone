@@ -156,7 +156,9 @@ On `screen:attach`/`device:set`, via `webContents.debugger` (CDP):
 - Safe areas: try `Emulation.setSafeAreaInsetsOverride` (top: 59 for
   dynamic-island devices, 47 notch, 24 android; bottom: 34 iOS / 24
   android gesture bar; 0 for none). Wrap in try/catch — older Chromium
-  lacks it; on failure, no-op.
+  lacks it; on failure, no-op. (Android values superseded: the v0.1.2
+  safe-area table + VERDICT below are the source of truth — android is
+  0/0 because the renderer lays content out between the bars.)
 - `Emulation.setEmulatedMedia` features `display-mode: standalone` only
   when standalone:set on.
 - Accept-Language/etc. left alone.
@@ -277,7 +279,23 @@ A second capture `./selftest-screen.png` of just the webview contents.
 appId `com.devphone.app`, productName `DevPhone`, win targets `nsis` +
 `portable`, includes `pw-browsers/**` via extraResources (and main sets
 PLAYWRIGHT_BROWSERS_PATH to resourcesPath/pw-browsers when packaged),
-icon optional (skip if none), output `dist/`.
+output `dist/`. The single portable `DevPhone <ver>.exe` is the
+share-with-anyone artifact — self-contained (WebKit inside), no install.
+
+**Icon:** `build/icon.svg` is the vector master; `npm run icon`
+(`scripts/make-icon.js`) renders it via the project's own Electron to
+`build/icon.ico` (16→256px multi-res), `build/icon.png` (512) and
+`src/assets/icon.png` (256, shipped in the asar for the runtime
+BrowserWindow icon). `win.icon` + the nsis `*Icon` fields point at the
+`.ico`. main sets `app.setAppUserModelId('com.devphone.app')` so the
+Windows taskbar groups under the app identity and shows the icon.
+
+**Signing:** we have no certificate, so `win.signExecutable: false` — this
+skips ONLY the codesign step while electron-builder still embeds the icon +
+version metadata through its pure-JS `resedit` path (no winCodeSign download,
+so no symlink-privilege / Developer-Mode requirement). Do NOT revert to
+`signAndEditExecutable: false`: that also drops the icon. Unsigned exes trip
+SmartScreen on first run (More info → Run anyway) — expected without a cert.
 
 ## Visual quality bar (UI agent)
 
@@ -377,19 +395,35 @@ is called on screen:attach, device:set re-applies, and standalone:set
 | iOS classic button (`cutout:none`) | 20 | 0 |
 | android (any) | 0 | 0 — status/gesture bars handled by renderer layout |
 
-**Measured verdict (scratch/test-safearea.js, Electron 33.4.11 / Chromium
-130.0.6723.191):** `Emulation.setSafeAreaInsetsOverride` does NOT exist
-("method wasn't found"), and no `Emulation.setDeviceMetricsOverride`
-variant (screenOrientation/viewport/displayFeature/extra-param probes)
-plumbs `env(safe-area-inset-*)` — it stays `0px` under every attempt, with
-and without reload. The command first ships in **Chromium 136** (verified
-against release-tag pdls: absent in 135.0.7049.41, present in
-136.0.7103.48), i.e. **Electron ≥36** is required. Until the integrator
-bumps Electron, `applySafeArea` is a warn-once no-op and pages see inset 0
-— the renderer's content-viewport layout (v0.1.1) is the only protection
-against content under the Dynamic Island. The implemented call shape
-matches the Chromium 136 protocol: `{insets:{top,topMax,left,leftMax,
-bottom,bottomMax,right,rightMax}}` (all integers; *Max set equal to base).
+**Measured verdict (scratch/test-safearea.js + scratch/test-safearea-devices.js,
+Electron 36.9.5 / Chromium 136.0.7103.177 — supersedes the Electron 33 /
+Chromium 130 verdict that recorded the command as missing):**
+`Emulation.setSafeAreaInsetsOverride` EXISTS and WORKS. The nested shape
+`{insets:{top,topMax,left,leftMax,bottom,bottomMax,right,rightMax}}` (all
+integers; *Max equal to base) is accepted; the flat `{top,...}` shape is
+rejected with "Invalid parameters" — `applySafeArea` tries nested first, so
+it applies on the first send. Measured through the real
+`emulation.applySafeArea` against a `viewport-fit=cover` page:
+`env(safe-area-inset-top/bottom)` report exactly the table above —
+59/34 (dynamic-island), 47/34 (notch), 20/0 (iOS classic), 0/0 (android,
+both punch-hole and notch cutouts — renderer layout owns Android bars, and
+real Android Chrome reports 0 in browser mode; the "top 24 android" figure
+in the original emulation spec above is superseded by this table). The
+override persists across reloads and subsequent
+`setDeviceMetricsOverride` calls, and standalone mode keeps the same
+insets. `applySafeArea` is therefore LIVE on the current stack; the
+warn-once no-op path remains only as the <136 fallback. Selftests green on
+Electron 36.9.5: default (440×831 content viewport), `--st-engine=webkit`,
+`--st-device=galaxy-s25-ultra` (412×804) — flags take `=value` form.
+
+**WebKit engine (measured, Playwright 1.x webkit-2287, same probe page):**
+NO inset emulation exists or is possible — `env(safe-area-inset-*)` is
+supported syntax but always resolves `0px` in Playwright WebKit (desktop
+port, no notch geometry), and Playwright exposes no API to override it
+(nothing in context options, no protocol command). webkit.js intentionally
+has no inset code; the renderer's content-viewport layout is the only
+safe-area protection in WebKit mode. Validate `env()`-dependent fixes
+(e.g. the Skycrew PDF-overlay buttons) on the Chromium engine.
 
 ### Parallel-safe test plumbing
 
@@ -550,3 +584,229 @@ pointerdown → mousedown → focus → pointerup → mouseup → click. Suite
 scenario S13 replicates the portal pattern locally (click-bound card +
 capture-phase document listener); S9–S12 cover selection, shadow margin,
 always-on-top and cursor scoping. test-ui-v012: 27 scenarios.
+
+## v0.1.5 extensions (renderer input pipeline + emulation)
+
+### sendInputEvent offset compensation REMOVED (measured, probe-mousemode.js)
+
+Electron 36 delivers `webContents.sendInputEvent` coordinates to the guest
+UNCHANGED (sent == arrival; guest CSS px). The E33-era "arrival = sent +
+webview rect offset" pre-compensation (`fwdXY`) therefore shifted EVERY
+forwarded event ~65px up-left: mouse-mode clicks landed on the wrong element
+(or nothing), and the hover mouseMoves forwarded in BOTH input modes lit up
+the wrong control's `:hover` — on the Skycrew portal the highlight sat on a
+neighboring card/button while the synthetic tap hit the aimed one, reading as
+"taps click the wrong location". `fwdXY` is gone; all forwarding uses
+`localXY` (plain guest-local CSS px, descaled by the visual transform).
+Verified on the live portal (probe-v015-verify.js): hover tracks the aimed
+card, mouse-mode click selects it.
+
+### Wheel scrolling is EASED (was: one raw tick = one visible jump)
+
+A CDP `Input.dispatchMouseEvent mouseWheel` applies its whole delta
+instantly — Chromium's smooth wheel-scroll animation never runs for injected
+events — so forwarding ~100px hardware ticks 1:1 produced stepwise jumps.
+The renderer now drains accumulated wheel deltas through a per-frame
+exponential ease-out (~28%/frame, ≥16px/frame, first step ships in the wheel
+handler itself — no added latency), one small mouseWheel sample per frame.
+Distance is preserved exactly; new ticks fold into a running drain; the
+`gestureBroken` fallback recovers any undrained remainder synthetically.
+Measured: a single 240px tick lands as ~8 growing frames (67→115→…→240).
+
+### dispatchGesture is PIPELINED (was: one ack round-trip per sample)
+
+Every CDP input ack waits for the guest main thread to process the event;
+awaiting each `Input.dispatchTouchEvent` sequentially throttled drag-move
+delivery to one guest-frame per sample — drags stuttered on any page doing
+work. All sends in a batch are now issued synchronously (the debugger
+session serializes them, so touchStart/move/end order still holds) and the
+batch resolves on the last ack. The cross-batch promise chain stays.
+
+Suite gates unchanged: test-gestures-v012 12/12, test-ui-v012 27/27, both
+green twice consecutively after the change.
+
+### Local self-update (no update server — builds are local)
+
+Symptom this kills: the user reinstalls from `dist/` but the installer there
+predates the latest source fixes, silently shipping old code (it happened:
+the 14:09 installer vs the 14:28 fixes).
+
+- `scripts/stamp-build.js` (electron-builder `beforePack`): writes
+  `build-info.json` at the project root — `{buildTime, builtAt, projectDir}`
+  — included in the asar via `files`, so every build knows when it was built
+  and where the project lives.
+- `scripts/local-publish.js` (`afterAllArtifactBuild`): writes
+  `dist/latest-build.json` — `{buildTime, builtAt, setup, portable}` (abs
+  artifact paths) — the local stand-in for an update feed.
+- `src/main/selfupdate.js`: ~1.5s after the shell window is up, a PACKAGED
+  NSIS install compares its stamp against the manifest in
+  `<projectDir>/dist/`. Strictly-newer build present → native dialog
+  ("Install now" / "Later"); install = spawn the setup exe DETACHED with
+  `/S --force-run` (electron-updater's recipe: silent NSIS install closes
+  the running app, installs, relaunches) and quit.
+- Silent no-ops by design: dev runs, portable exes
+  (`PORTABLE_EXECUTABLE_FILE`), selftest, pre-v0.1.5 installs (no stamp),
+  moved/missing project dir, malformed manifests. The check can never break
+  boot. No IPC, no renderer involvement, fully offline.
+
+Workflow: edit source → `npm run dist` → the already-installed app offers
+the update on its next launch.
+
+### New IPC: `shell:drag {phase:'start'|'move'|'end', x?, y?}` → `{ok}`
+
+Bezel window drag. The phone FRAME can't be a CSS app-region (drag regions
+are HTCAPTION on Windows and swallow bezel right-clicks — the v0.1.3
+context-menu lesson), so dragging is manual: the renderer pointer-captures
+`#phone` presses that did NOT start on `#screen` / `#hw-home-button` and
+pings start/move/end per animation frame (NO coordinates).
+
+COORDINATES ARE MAIN'S JOB: `screen.getCursorScreenPoint()` — OS ground
+truth in integer DIPs, the same space as window bounds. The first version
+streamed the renderer's `e.screenX/Y` instead; those are computed against a
+window origin that lags our own moves during the drag, and the feedback
+accumulated into a slow DOWNWARD drift — the phone visibly slid out from
+under the grab cursor on long back-and-forth drags (user-reported, v0.1.5).
+Anchor + ground truth cannot drift: cursor back at the press point ⇒ window
+back at the press bounds, exactly. Each move is ONE
+`setBounds({x,y,width,height})` with the ANCHORED size and NO style
+toggles. Measured verdicts behind that exact shape (probe-setbounds.js,
+Electron 36 / Windows 11 / 150% display scale):
+- `setPosition` GROWS a resizable:false window ~1px per call
+  (DIP→physical→DIP re-rounding) — accumulated during the move stream and
+  made the phone snap at drag release when a one-shot restore corrected it;
+- `setResizable(true)…(false)` toggles (per-move OR once at release) make
+  Windows 11 blink its standard window border around the mostly transparent
+  window rectangle;
+- `setBounds` WITH a size applies cleanly on resizable:false — the
+  long-standing "size writes are blocked on resizable:false" assumption is
+  FALSE on this stack — and holds bounds exactly: zero drift, zero
+  restyling. `shell:resize` uses the same toggle-free setBounds now.
+No-op moves are skipped. Explicit `{x,y}` on start/move is still honored so
+the suite can drive the handler deterministically without moving the real
+cursor.
+
+Preload: `devphone.shellDrag(phase, x?, y?)`. Cursor affordance: `grab` on
+the frame, `grabbing` while dragging; the `#screen` subtree resets to its
+own cursors. Suite: scratch/test-bezeldrag.js (6 checks — exact delta move,
+ZERO drift across 50 wiggle cycles incl. size, pointer arm/disarm, no drag
+from screen presses, bezel right-click menu, cursor scoping); UI 27/27 +
+gestures 12/12 + clickthrough 7/7 unchanged.
+
+### WebKit engine: persistent logins (storageState round-trip)
+
+Chromium mode keeps sessions via the `persist:devphone` partition, but the
+WebKit engine created a pristine `newContext()` on every start — engine
+switch, device switch, or app relaunch logged the user out of everything
+(symptom: re-entering a portal PIN on every single visit). Cookies +
+localStorage now persist through Playwright's `storageState`:
+`userData/webkit-storage.json` is loaded into `newContext()` when present
+(corrupt/incompatible file → deleted, clean start; never blocks engine
+start), saved on every `closeContext()` (covers stop/switch/quit) and
+debounced ~2s after each `domcontentloaded`. HttpOnly cookies are included
+— Playwright captures them below the page layer. Probe:
+`scratch/probe-wkstate.js` (6 checks: save on stop, cookie + localStorage
+in the file, fresh-context restore resends the cookie to the server).
+
+### New IPC: `webkit:window {url?}` → `{ok, reused?}` — standalone WebKit preview
+
+⚙ Settings → "Preview · 🧭 Open in WebKit window" opens the CURRENT page in
+a real, headed Playwright-WebKit window: native interaction speed (no frame
+streaming, no bezel) for quickly clicking through a page in true WebKit.
+`webkit.openWindow({device,url})` launches a SEPARATE headed browser
+process (the streaming engine stays headless), with the device's full
+viewport/dpr/UA + the same init shims, and the SAME
+`userData/webkit-storage.json` storage state — logins carry over both ways
+(saved on each `domcontentloaded` and on window close). A second call while
+the window is open navigates + refocuses it (`{reused:true}`) instead of
+spawning another. The renderer passes its own `state.url` (main's
+`currentUrl` can lag in chromium mode) and rejects `about:blank`/`data:`
+with a toast. Closed by the user like any window; `shutdown()` also reaps
+it. Preload: `devphone.webkitWindow(url)`. Probe:
+`scratch/probe-wkwindow.js` (5 checks: open, navigation hit, persisted
+cookie arrives in the headed window, reuse path).
+
+### New IPC: `shell:ignoreMouse {on}` → `{ok, on}` — invisible regions are CLICK-THROUGH
+
+The OS window is a big transparent rectangle (phone + 48px shadow margin +
+gap + rail + MIN_WIN_H slack above/below); those invisible areas swallowed
+clicks meant for the window BEHIND DevPhone. The renderer (wireClickThrough)
+now drives `win.setIgnoreMouseEvents(on, {forward:true})` from cursor
+position: over nothing visible → ignored (clicks/focus fall through to the
+app behind), over `#phone-wrap` / the rail / popovers / ctx menu →
+interactive. `forward:true` keeps mousemoves flowing while ignored so the
+shell re-arms itself at the phone edge. Rules: any open popover/ctx-menu
+(click-catcher modality) keeps the WHOLE window interactive so the outside
+click can close it; no state flips mid-press (`e.buttons`); the v0.1.1
+focus-follows-mouse `shell:activate` is suppressed while click-through (it
+used to steal focus when the cursor merely crossed the margin). The `#stage`
+app-region drag is GONE — window dragging is bezel (shell:drag) + rail.
+`state.mouseIgnored` in main + `win.__mouseIgnored` are the observable test
+hooks. Preload: `devphone.shellIgnoreMouse(on)`.
+Suite: scratch/test-clickthrough.js (7 checks); UI 27/27, gestures 12/12,
+bezeldrag 5/5 unchanged.
+
+## v0.1.6 extensions (cloud auto-update + app icon)
+
+### Cloud auto-update (electron-updater + GitHub, custom in-app UX)
+
+Supersedes the v0.1.5 local `dist/` self-update (`selfupdate.js` retained but no
+longer wired). Installed NSIS builds check a GitHub releases feed on launch and
+drive a phone-styled in-app flow instead of electron-updater's default dialogs.
+
+- Feed: `publish` in electron-builder.yml → github, owner `flodisterhoft-ops`,
+  repo `devphone-releases` — a PUBLIC releases-only repo (installers +
+  latest.yml, no source), so clients update with NO token embedded.
+  `releaseType: release` publishes immediately. electron-builder bakes
+  `app-update.yml` into the package from this config.
+- `src/main/cloudupdate.js` — owns `electron-updater`'s autoUpdater with
+  `autoDownload=false` (show the changelog first) + `autoInstallOnAppQuit=true`
+  (safety net). Every updater event is funneled to the renderer as one
+  `appupdate:event {type,...}` (`type`: checking | available | progress |
+  downloaded | none | error). Logs the whole lifecycle to
+  `userData/update.log`. No-ops in an unpackaged dev run (no app-update.yml)
+  unless `DEVPHONE_FORCE_UPDATE`. Test hook `DEVPHONE_UPDATE_TESTVER=<low ver>`
+  overrides `autoUpdater.currentVersion` so a check finds the current release.
+  main.js calls `cloudupdate.init({send})` + a check ~3s after launch (packaged,
+  non-selftest).
+
+New IPC (renderer → main invoke; preload allowlist + conveniences):
+`appupdate:check` → `check()`; `appupdate:download` → `downloadUpdate()`;
+`appupdate:install` → `quitAndInstall(false,true)` (silent per-user NSIS +
+relaunch). Event channel `appupdate:event`. Preload: `devphone.appUpdateCheck /
+appUpdateDownload / appUpdateInstall / onAppUpdate(cb)`.
+
+`src/renderer/update.js` (+ `.dpu-*` in shell.css; loaded last in index.html) —
+self-contained overlay: "What's new" card + changelog, download progress bar,
+then a full-window confetti "Poof!" celebration + Restart. It is a full-window
+modal, so `wireClickThrough`'s `overVisible()` returns true whenever
+`#dpu-overlay` is shown (keeps the window interactive for its buttons). Demo:
+Ctrl+Shift+U, or `window.dpuDemo('available'|'progress'|'done')` (used by
+`scripts/shot-update.js` to screenshot the flow without a release).
+
+**Settings → About:** the app version comes from the sync `app:version`
+channel (ipc.js → `app.getVersion()`, exposed as `devphone.version`), shown in
+the ⚙ Settings popover next to a "Check for updates" row that calls
+`window.dpUpdate.check()` — a manual check with toast feedback (up to date /
+couldn't check); an available update opens the popup as usual.
+`scripts/shots.js` renders the README product screenshots from the real shell.
+
+### Changelog + release workflow
+
+`scripts/gen-notes.js` → `build/release-notes.md` from git commit subjects since
+the last tag (or `RELEASE_NOTES.md` verbatim if present); electron-builder
+embeds it into latest.yml (→ electron-updater `releaseNotes`, rendered as the
+changelog) and the GitHub release body. `scripts/release.js` (`npm run release`)
+pulls the GitHub token from the `gh` CLI, regenerates notes, gates on WebKit,
+then `electron-builder --win nsis --publish always`. Workflow: bump
+`package.json` version → `npm run release` → the brother's installed app offers
+the update on next launch. `npm run dist` stays local-only (nsis + portable, no
+publish); the auto-updatable artifact is the NSIS installer.
+
+### App icon
+
+`build/icon.svg` → `npm run icon` (`scripts/make-icon.js`, renders via the
+project's Electron) → `build/icon.ico` (16–256px) + `src/assets/icon.png` (256,
+shipped for the runtime BrowserWindow icon). `win.signExecutable: false` keeps
+icon+metadata embedding (pure-JS resedit) while skipping only codesign — see the
+Packaging section. `app.setAppUserModelId('com.devphone.app')` sets the taskbar
+identity.
