@@ -10,7 +10,17 @@ Test mobile-first sites the way your clients actually see them — a realistic,
 draggable phone body with the real home screen, browser chrome, PWA install
 flow, and a **true WebKit (Safari) engine** running on Windows.
 
-<img src="assets/portal.png" width="300" alt="DevPhone rendering a real site in an iPhone frame">
+<a href="https://github.com/flodisterhoft-ops/devphone-releases/releases/latest"><img src="https://img.shields.io/badge/Download_for_Windows-6C4CF1?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows"></a>
+&nbsp;
+<a href="https://buymeacoffee.com/flodisterhoft"><img src="https://img.shields.io/badge/Buy_me_a_coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
+
+<p>
+  <img src="assets/home.png" width="216" alt="iPhone home screen">
+  <img src="assets/preview.png" width="216" alt="A live site rendered in Safari">
+  <img src="assets/android.png" width="216" alt="Galaxy S25 Ultra">
+</p>
+
+<sub>A real home screen, any site in a real Safari frame, and multiple devices — the window <b>is</b> the phone. Drag it anywhere.</sub>
 
 </div>
 
@@ -24,17 +34,9 @@ mobile-web emulation inside an actual phone body — so the toolbars, safe areas
 home screen, and PWA flow all behave like the real thing.
 
 <div align="center">
-<table>
-<tr>
-<td width="50%"><img src="assets/iphone.png" alt="iPhone frame with Safari chrome"></td>
-<td width="50%"><img src="assets/galaxy.png" alt="Galaxy frame with Chrome"></td>
-</tr>
-<tr>
-<td align="center"><sub><b>iPhone</b> — Safari chrome, Dynamic Island, real viewport</sub></td>
-<td align="center"><sub><b>Galaxy</b> — Chrome chrome, Android status bar</sub></td>
-</tr>
-</table>
-<sub>The floating dock switches device, engine, zoom, and tools. The window <b>is</b> the phone — drag it anywhere.</sub>
+<img src="assets/app.png" width="560" alt="DevPhone rendering a site next to its floating tool dock">
+<br>
+<sub>The floating dock switches device, engine, zoom, and tools — point it at a live URL or your own <code>localhost</code>.</sub>
 </div>
 
 ## What it does
@@ -62,6 +64,8 @@ home screen, and PWA flow all behave like the real thing.
   saved to `Pictures/DevPhone` + clipboard.
 - **Touch & pinch** — the mouse acts as a finger; real touchscreen input passes
   through on touch laptops.
+- **🔄 Self-updating** — new versions download and install themselves with an
+  in-app changelog; check manually any time in **Settings → About**.
 - **New-phone watcher** — checks daily for new iPhone / Galaxy S models and adds
   them with estimated specs (flagged until verified).
 
@@ -69,10 +73,16 @@ home screen, and PWA flow all behave like the real thing.
 
 Grab the latest installer from
 **[Releases](https://github.com/flodisterhoft-ops/devphone-releases/releases/latest)**,
-run it, and you're set — it keeps itself up to date.
+run it, and you're set — it keeps itself up to date from then on.
 
 > Windows may show a SmartScreen notice (the app isn't code-signed):
 > **More info → Run anyway**.
+
+<div align="center">
+<img src="assets/update.png" width="420" alt="In-app update with changelog and progress">
+<br>
+<sub>When a new version ships, DevPhone shows you what's new and updates itself.</sub>
+</div>
 
 ## Run from source
 
