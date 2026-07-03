@@ -850,7 +850,7 @@
      sent == arrival). The old E33-era "arrival = sent + rect offset"
      pre-compensation shifted every forwarded event ~65px off-target — that
      was mouse-mode clicks landing on the wrong element AND the touch-mode
-     hover highlight lighting up the wrong control (e.g. the Skycrew portal
+     hover highlight lighting up the wrong control (e.g. a real portal's
      cards) while the synthetic tap then hit the aimed one.                  */
 
   function guestBlurUnlessEditing() {
@@ -887,7 +887,7 @@
              'document.addEventListener("pointerdown",function(){' +
              'try{console.log("__DEVPHONE_TAP__")}catch(e){}},{capture:true,passive:true});' +
              // WebAuthn: Chromium exposes PublicKeyCredential, so passkey-first
-             // sites (e.g. the Skycrew portal) switch to "Sign In with Face /
+             // sites (e.g. a passkey-first portal) switch to "Sign In with Face /
              // Fingerprint" — but navigator.credentials.get() can never
              // complete inside this webview (no authenticator UI), leaving
              // the page stuck on "Waiting…" forever. Behave like a user who

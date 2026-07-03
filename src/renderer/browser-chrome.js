@@ -463,7 +463,7 @@
   /* ---------- start page ------------------------------------------------------------------ */
 
   var QUICK_LINKS = [
-    { name: 'Skycrew Portal', url: 'https://skycrewltd.ca/portal/' }
+    { name: 'Example', url: 'https://example.com/' }
   ];
 
   function showStart(browser) {

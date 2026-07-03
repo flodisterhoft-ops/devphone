@@ -9,3 +9,6 @@ st.log
 galaxy-test.log
 selftest.json
 build-info.json
+
+# debug logs (never commit — may contain local paths)
+*.log

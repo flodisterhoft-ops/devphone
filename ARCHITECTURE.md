@@ -423,7 +423,7 @@ port, no notch geometry), and Playwright exposes no API to override it
 (nothing in context options, no protocol command). webkit.js intentionally
 has no inset code; the renderer's content-viewport layout is the only
 safe-area protection in WebKit mode. Validate `env()`-dependent fixes
-(e.g. the Skycrew PDF-overlay buttons) on the Chromium engine.
+(e.g. a real site's `env()`-positioned overlay buttons) on the Chromium engine.
 
 ### Parallel-safe test plumbing
 
@@ -568,8 +568,8 @@ Both suites green twice consecutively; selftest
 
 ### Guest WebAuthn shim (tap-beacon injection)
 
-Chromium exposes `PublicKeyCredential`, so passkey-first sites (e.g. the
-Skycrew portal) hide their PIN UI — but `navigator.credentials.get()`
+Chromium exposes `PublicKeyCredential`, so passkey-first sites (e.g. a
+bank or portal) hide their PIN UI — but `navigator.credentials.get()`
 can never complete inside the webview, hanging "Sign In" forever. The
 per-load guest injection now wraps `credentials.get/create`: publicKey
 requests reject after ~400ms with `NotAllowedError` (= user cancelled
@@ -594,7 +594,7 @@ UNCHANGED (sent == arrival; guest CSS px). The E33-era "arrival = sent +
 webview rect offset" pre-compensation (`fwdXY`) therefore shifted EVERY
 forwarded event ~65px up-left: mouse-mode clicks landed on the wrong element
 (or nothing), and the hover mouseMoves forwarded in BOTH input modes lit up
-the wrong control's `:hover` — on the Skycrew portal the highlight sat on a
+the wrong control's `:hover` — on a real card-based portal the highlight sat on a
 neighboring card/button while the synthetic tap hit the aimed one, reading as
 "taps click the wrong location". `fwdXY` is gone; all forwarding uses
 `localXY` (plain guest-local CSS px, descaled by the visual transform).
