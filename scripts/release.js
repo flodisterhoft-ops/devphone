@@ -13,6 +13,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const { execSync, spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -59,6 +60,38 @@ if (!real) {
   process.exit(1);
 }
 gh(`api -X PATCH repos/${REPO}/releases/${real.id} -F draft=false -f make_latest=true`);
+
+// Concurrent electron-builder publishers can split assets across duplicate
+// draft releases. The installer identifies the release we keep; make sure its
+// update manifest and differential-download block map are present before the
+// empty/partial drafts are removed. Upload from local dist using the normalized
+// remote names electron-updater requests.
+const DIST = path.join(ROOT, 'dist');
+const expectedAssets = [
+  { local: 'latest.yml', remote: 'latest.yml' },
+  { local: `DevPhone Setup ${version}.exe.blockmap`, remote: `DevPhone-Setup-${version}.exe.blockmap` },
+];
+const liveNames = new Set((real.assets || []).map((asset) => asset.name));
+expectedAssets.forEach((asset) => {
+  if (liveNames.has(asset.remote)) return;
+  const source = path.join(DIST, asset.local);
+  if (!fs.existsSync(source)) {
+    console.error('release: required asset missing locally: ' + source);
+    process.exit(1);
+  }
+  const upload = path.join(DIST, asset.remote);
+  const copied = source !== upload;
+  if (copied) fs.copyFileSync(source, upload);
+  try {
+    gh(`release upload ${TAG} "${upload}" --repo ${REPO} --clobber`);
+    console.log('  • restored release asset ' + asset.remote);
+  } finally {
+    if (copied) {
+      try { fs.unlinkSync(upload); } catch (e) {}
+    }
+  }
+});
+
 mine.filter((r) => r.id !== real.id).forEach((r) => {
   try { gh(`api -X DELETE repos/${REPO}/releases/${r.id}`); console.log('  • removed duplicate draft release ' + r.id); } catch (e) {}
 });
