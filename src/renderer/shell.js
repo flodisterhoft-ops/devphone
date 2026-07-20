@@ -244,7 +244,18 @@
   }
 
   function scaleStorageKey(device) {
-    return formFactorOf(device) === 'tablet' ? 'devphone.scale.tablet' : 'devphone.scale';
+    return formFactorOf(device) === 'tablet'
+      ? 'devphone.scale.tablet.' + device.id
+      : 'devphone.scale';
+  }
+
+  function defaultScaleFor(device) {
+    if (formFactorOf(device) !== 'tablet') return 1;
+    var vp = device.viewport || {};
+    // Regular tablets are comfortably readable at 75%. Oversized canvases
+    // (12.9/13-inch iPad Pros and Galaxy Tab Ultra) stay at 50% so their
+    // portrait frame still fits a typical 1440p desktop with display scaling.
+    return Math.max(Number(vp.width) || 0, Number(vp.height) || 0) > 1250 ? 0.5 : 0.75;
   }
 
   function savedScaleFor(device) {
@@ -252,7 +263,7 @@
     var saved = NaN;
     try { saved = parseFloat(localStorage.getItem(scaleStorageKey(device))); } catch (e) {}
     if (allowed.indexOf(saved) >= 0) return saved;
-    return formFactorOf(device) === 'tablet' ? 0.5 : 1;
+    return defaultScaleFor(device);
   }
 
   function sbHeight(device) {
@@ -761,8 +772,7 @@
     var device = null;
     state.devices.forEach(function (d) { if (d.id === id) device = d; });
     if (!device || (state.device && state.device.id === id)) return;
-    var oldFormFactor = formFactorOf(state.device);
-    if (formFactorOf(device) !== oldFormFactor) state.scale = savedScaleFor(device);
+    state.scale = savedScaleFor(device);
     goHome(true);
     device = orientedDevice(device, savedOrientationFor(device));
     applyDevice(device);

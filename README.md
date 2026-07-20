@@ -46,8 +46,9 @@ home screen, and PWA flow all behave like the real thing.
   Galaxy S24 → S26 lineups, budget Android, Pixel 9, multiple iPad generations,
   and Galaxy Tab S11 / S11 Ultra. Phones and tablets live in separate picker
   categories. Exact logical viewports, devicePixelRatio, and user agents
-  (researched & verified per device). Device-aware scale presets keep large
-  tablet frames usable on a desktop.
+  (researched & verified per device). Regular tablets open at a readable 75%;
+  oversized 12.9/13-inch and Ultra models use 50% so they remain on screen.
+  Zoom is remembered separately for each tablet.
 - **Portrait + landscape tablets** — rotate any iPad or Galaxy Tab with one
   button. The visible frame, content viewport, `screen` dimensions, orientation
   media queries, and both rendering engines rotate together; orientation is

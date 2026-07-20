@@ -1,5 +1,3 @@
-- Separate Phone and Tablet picker, with multiple iPad generations and Galaxy Tab S11 / S11 Ultra
-- Portrait and landscape rotation for every tablet, remembered per device
-- Accurate tablet viewports, DPR, user agents, Android client hints, and iPad identity shims in Chromium and WebKit
-- One-click updates: review the fixes, press Update now once, and DevPhone installs, restarts, and reopens automatically
-- New tablet-mode screenshots and updated feature documentation
+- Regular-size tablets now open at 75% instead of 50%, making them substantially larger and easier to inspect
+- Oversized tablets such as Galaxy Tab S11 Ultra and 12.9/13-inch iPad Pro stay at 50% so they still fit on screen
+- Zoom is remembered separately for every tablet, so resizing one model no longer changes the others

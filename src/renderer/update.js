@@ -352,14 +352,13 @@
   /* ---------- demo (Ctrl+Shift+U) ---------- */
 
   var DEMO_NOTES =
-    'Separate Phone and Tablet picker\n' +
-    'Multiple iPad generations and Galaxy Tab S11 models\n' +
-    'Portrait and landscape tablet rotation\n' +
-    'One-click install and automatic restart';
+    'Regular tablets now open larger at 75%\n' +
+    'Oversized Ultra and iPad Pro models still fit at 50%\n' +
+    'Zoom is remembered separately for every tablet';
 
   function runDemo() {
     cur.demo = true;
-    toAvailable('0.1.8', DEMO_NOTES);
+    toAvailable('0.1.9', DEMO_NOTES);
   }
 
   function runDemoProgress() {
@@ -369,7 +368,7 @@
       if (p >= 100) {
         p = 100; clearInterval(iv);
         setProgress(100, 3.2 * 1024 * 1024);
-        setTimeout(function () { toDone('0.1.8'); }, 400);
+        setTimeout(function () { toDone('0.1.9'); }, 400);
       } else {
         setProgress(p, (2 + Math.random() * 3) * 1024 * 1024);
       }
@@ -379,8 +378,8 @@
   // Force a specific stage with fake data (used by scripts/shot-update.js).
   window.dpuDemo = function (stage) {
     cur.demo = true;
-    if (stage === 'progress') { toAvailable('0.1.8', DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
-    else if (stage === 'done') { toDone('0.1.8'); }
+    if (stage === 'progress') { toAvailable('0.1.9', DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
+    else if (stage === 'done') { toDone('0.1.9'); }
     else runDemo();
   };
 

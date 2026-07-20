@@ -837,3 +837,14 @@ identity.
 - Once an accepted update finishes downloading, the renderer immediately calls
   `quitAndInstall(false,true)` after a short visible confirmation. The existing
   `autoInstallOnAppQuit` remains the safety net.
+
+## v0.1.9 extensions (size-aware tablet display scale)
+
+- Fresh regular-size tablets (long edge ≤1250 CSS px) open at 75% display
+  scale. Oversized models (12.9/13-inch iPad Pro and Galaxy Tab Ultra) open at
+  50% so portrait mode still fits a typical 1440p scaled desktop.
+- Tablet zoom now persists per device under
+  `devphone.scale.tablet.<deviceId>` instead of one shared tablet key. Phone
+  zoom remains shared under `devphone.scale`.
+- Every device switch reloads the destination device's saved/default scale;
+  changing one tablet therefore cannot resize another tablet unexpectedly.
