@@ -1,4 +1,5 @@
-- New phone app icon — in the taskbar, the installer, and the shortcut
-- Automatic cloud updates: DevPhone now keeps itself up to date
-- A friendly in-app update — changelog, progress bar, and a little celebration
-- Settings → About shows your version with a “Check for updates” button
+- Separate Phone and Tablet picker, with multiple iPad generations and Galaxy Tab S11 / S11 Ultra
+- Portrait and landscape rotation for every tablet, remembered per device
+- Accurate tablet viewports, DPR, user agents, Android client hints, and iPad identity shims in Chromium and WebKit
+- One-click updates: review the fixes, press Update now once, and DevPhone installs, restarts, and reopens automatically
+- New tablet-mode screenshots and updated feature documentation

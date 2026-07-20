@@ -159,6 +159,8 @@ async function injectCfg(wc) {
     os: d.os || '',
     deviceId: d.id || '',
     deviceLabel: d.label || '',
+    formFactor: d.formFactor === 'tablet' ? 'tablet' : 'phone',
+    orientation: d.orientation || 'portrait',
     viewport: d.viewport || null,
     dpr: d.dpr || 1,
     themeColor: st.themeColor || null,
@@ -175,6 +177,14 @@ async function injectCfg(wc) {
 
 function computeInsets(device) {
   if (!device) return { top: 0, bottom: 0, left: 0, right: 0 };
+  if (device.safeArea && typeof device.safeArea === 'object') {
+    return {
+      top: Number(device.safeArea.top) || 0,
+      bottom: Number(device.safeArea.bottom) || 0,
+      left: Number(device.safeArea.left) || 0,
+      right: Number(device.safeArea.right) || 0,
+    };
+  }
   if (device.os === 'ios') {
     if (device.cutout === 'dynamic-island') return { top: 59, bottom: 34, left: 0, right: 0 };
     if (device.cutout === 'notch') return { top: 47, bottom: 34, left: 0, right: 0 };
@@ -273,6 +283,9 @@ async function applyDevice(wc, device, options) {
     mobile: true,
     screenWidth: vp.width,
     screenHeight: vp.height,
+    screenOrientation: device.orientation === 'landscape'
+      ? { type: 'landscapePrimary', angle: 90 }
+      : { type: 'portraitPrimary', angle: 0 },
   });
 
   // v0.1.1: input mode lives in central state — dom-ready re-applies must
@@ -297,7 +310,7 @@ async function applyDevice(wc, device, options) {
         platformVersion: String(device.osVersion || ''),
         architecture: '',
         model: device.uaModel || '',
-        mobile: true,
+        mobile: device.formFactor !== 'tablet',
         bitness: '',
         wow64: false,
       },
@@ -317,7 +330,7 @@ async function applyDevice(wc, device, options) {
           platformVersion: '',
           architecture: '',
           model: '',
-          mobile: true,
+          mobile: device.formFactor !== 'tablet',
         },
       });
     }

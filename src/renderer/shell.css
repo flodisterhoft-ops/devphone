@@ -185,6 +185,86 @@ body.input-touch #webkit-canvas {
 #device-popover::-webkit-scrollbar { width: 6px; }
 #device-popover::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
 
+.dev-picker-title {
+  color: #f4f6fa;
+  font-size: 16px;
+  font-weight: 700;
+  padding: 10px 12px 2px;
+}
+.dev-picker-note {
+  color: #8f98a7;
+  font-size: 11.5px;
+  padding: 0 12px 10px;
+}
+.dev-kind {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 62px;
+  padding: 9px 10px;
+  margin: 2px 0;
+  color: #e8ebf2;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid transparent;
+  border-radius: 12px;
+}
+.dev-kind:hover { background: rgba(255, 255, 255, 0.09); }
+.dev-kind.current { border-color: rgba(10, 132, 255, 0.38); background: rgba(10, 132, 255, 0.12); }
+.dev-kind-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  color: #a9d2ff;
+  background: rgba(10, 132, 255, 0.16);
+  border-radius: 11px;
+}
+.dev-kind-icon svg { width: 27px; height: 27px; fill: none; stroke: currentColor; stroke-width: 1.8; }
+.dev-kind-icon svg circle, .dev-kind-icon svg rect:last-child { fill: currentColor; stroke: none; }
+.dev-kind-copy { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.dev-kind-copy strong { font-size: 13.5px; }
+.dev-kind-copy span { overflow: hidden; color: #98a0ad; font-size: 10.8px; text-overflow: ellipsis; white-space: nowrap; }
+.dev-kind-count { color: #8f98a7; font-size: 11px; }
+.dev-kind-next { color: #77808e; font-size: 23px; line-height: 1; transform: translateY(-1px); }
+
+.dev-list-head {
+  position: sticky;
+  top: -6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 7px 8px;
+  margin: -1px 0 4px;
+  background: rgba(26, 28, 35, 0.985);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+.dev-back {
+  flex: none;
+  width: 31px;
+  height: 31px;
+  color: #b9d9ff;
+  font-size: 25px;
+  line-height: 25px;
+  background: rgba(10, 132, 255, 0.14);
+  border: 0;
+  border-radius: 9px;
+}
+.dev-back:hover { background: rgba(10, 132, 255, 0.25); }
+.dev-list-title { color: #f0f2f7; font-size: 14px; font-weight: 700; line-height: 1.15; }
+.dev-list-count { color: #87909f; font-size: 10.5px; margin-top: 1px; }
+.dev-section {
+  padding: 10px 10px 4px;
+  color: #7f8999;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+
 .dev-row {
   display: flex;
   flex-direction: row;
@@ -201,6 +281,7 @@ body.input-touch #webkit-canvas {
 .dev-row:hover { background: rgba(255, 255, 255, 0.08); }
 .dev-row.current { background: rgba(10, 132, 255, 0.22); }
 .dev-mini { flex: none; display: block; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.4)); }
+.dev-mini-tablet { margin-left: -3px; margin-right: -3px; }
 .dev-col {
   display: flex;
   flex-direction: column;
@@ -576,6 +657,21 @@ body.android-standalone #statusbar .sb-android {
   font-size: 13.5px; font-weight: 500;
 }
 .sb-android .sb-batt-pct { font-size: 12px; margin-left: 1px; }
+.sb-ipad {
+  display: flex; justify-content: space-between; align-items: center;
+  height: 100%;
+  padding: 2px 18px 0;
+  font-family: var(--font-ios);
+  font-size: 13px; font-weight: 600;
+}
+
+/* Tablet home screens use the extra logical width instead of leaving a
+   phone-sized four-column island in the middle of the display. */
+#phone.form-tablet .hs { padding-left: 28px; padding-right: 28px; }
+#phone.form-tablet .hs-grid { grid-template-columns: repeat(6, 1fr); gap: 24px 12px; }
+#phone.form-tablet .hs-dock-wrap { align-self: center; width: min(72%, 640px); }
+#phone.form-tablet.orientation-landscape .hs-grid { grid-template-columns: repeat(8, 1fr); }
+#phone.form-tablet.orientation-landscape .hs-dock-wrap { width: min(58%, 720px); }
 
 /* ---------- home screens ------------------------------------------------ */
 

@@ -8,8 +8,8 @@
  *   launch → checkForUpdates()
  *     → update-available   → renderer shows "What's new" popup + changelog
  *     → user clicks Update  → downloadUpdate() → download-progress → progress bar
- *     → update-downloaded   → renderer plays the celebration, offers Restart
- *     → user clicks Restart → quitAndInstall() (silent per-user NSIS, relaunch)
+ *     → update-downloaded   → renderer confirms installation and immediately
+ *                             calls quitAndInstall() (silent per-user NSIS, relaunch)
  *
  * Every electron-updater event is funneled to the renderer as a single
  * 'appupdate:event' {type, ...}. autoInstallOnAppQuit stays ON as a safety net:

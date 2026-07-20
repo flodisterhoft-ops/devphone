@@ -869,6 +869,303 @@
       ],
       "estimated": false,
       "releaseYear": 2024
+    },
+    {
+      "id": "ipad-10",
+      "label": "iPad (10th generation)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 820,
+        "height": 1180
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 1640,
+        "height": 2360
+      },
+      "diagonalInches": 10.9,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#3b3c40",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2022
+    },
+    {
+      "id": "ipad-a16",
+      "label": "iPad (A16, 2025)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 656,
+        "height": 944
+      },
+      "dpr": 2.5,
+      "physical": {
+        "width": 1640,
+        "height": 2360
+      },
+      "diagonalInches": 11,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#4a4c52",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2025
+    },
+    {
+      "id": "ipad-mini-6",
+      "label": "iPad mini (6th generation)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 744,
+        "height": 1133
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 1488,
+        "height": 2266
+      },
+      "diagonalInches": 8.3,
+      "cutout": "none",
+      "cornerRadius": 20,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#4a4650",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2021
+    },
+    {
+      "id": "ipad-air-5",
+      "label": "iPad Air (5th generation)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 820,
+        "height": 1180
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 1640,
+        "height": 2360
+      },
+      "diagonalInches": 10.9,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#3f4550",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2022
+    },
+    {
+      "id": "ipad-pro-11-m4",
+      "label": "iPad Pro 11-inch (M4)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 834,
+        "height": 1210
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 1668,
+        "height": 2420
+      },
+      "diagonalInches": 11.1,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#25262a",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2024
+    },
+    {
+      "id": "ipad-pro-12-9-6",
+      "label": "iPad Pro 12.9-inch (6th generation)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 1024,
+        "height": 1366
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 2048,
+        "height": 2732
+      },
+      "diagonalInches": 12.9,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#303136",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2022
+    },
+    {
+      "id": "ipad-pro-13-m4",
+      "label": "iPad Pro 13-inch (M4)",
+      "formFactor": "tablet",
+      "brand": "apple",
+      "os": "ios",
+      "osVersion": "26",
+      "viewport": {
+        "width": 1032,
+        "height": 1376
+      },
+      "dpr": 2,
+      "physical": {
+        "width": 2064,
+        "height": 2752
+      },
+      "diagonalInches": 13,
+      "cutout": "none",
+      "cornerRadius": 18,
+      "bodyStyle": "tablet-apple",
+      "accentColor": "#242529",
+      "statusBarHeight": 24,
+      "safeArea": { "top": 24, "bottom": 20, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (iPad; CPU OS 26_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1",
+      "uaModel": "",
+      "browsers": [
+        "safari",
+        "chrome"
+      ],
+      "estimated": false,
+      "releaseYear": 2024
+    },
+    {
+      "id": "galaxy-tab-s11",
+      "label": "Galaxy Tab S11",
+      "formFactor": "tablet",
+      "brand": "samsung",
+      "os": "android",
+      "osVersion": "16",
+      "viewport": {
+        "width": 640,
+        "height": 1024
+      },
+      "dpr": 2.5,
+      "physical": {
+        "width": 1600,
+        "height": 2560
+      },
+      "diagonalInches": 11,
+      "cutout": "none",
+      "cornerRadius": 16,
+      "bodyStyle": "tablet-android",
+      "accentColor": "#3b3d40",
+      "statusBarHeight": 32,
+      "safeArea": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (Linux; Android 16; SM-X730) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+      "uaModel": "SM-X730",
+      "browsers": [
+        "chrome",
+        "samsung"
+      ],
+      "estimated": false,
+      "releaseYear": 2025
+    },
+    {
+      "id": "galaxy-tab-s11-ultra",
+      "label": "Galaxy Tab S11 Ultra",
+      "formFactor": "tablet",
+      "brand": "samsung",
+      "os": "android",
+      "osVersion": "16",
+      "viewport": {
+        "width": 1056,
+        "height": 1692
+      },
+      "dpr": 1.75,
+      "physical": {
+        "width": 1848,
+        "height": 2960
+      },
+      "diagonalInches": 14.6,
+      "cutout": "none",
+      "cornerRadius": 14,
+      "bodyStyle": "tablet-android",
+      "accentColor": "#333538",
+      "statusBarHeight": 32,
+      "safeArea": { "top": 0, "bottom": 0, "left": 0, "right": 0 },
+      "gestureNavigation": true,
+      "ua": "Mozilla/5.0 (Linux; Android 16; SM-X930) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+      "uaModel": "SM-X930",
+      "browsers": [
+        "chrome",
+        "samsung"
+      ],
+      "estimated": false,
+      "releaseYear": 2025
     }
   ]
 }

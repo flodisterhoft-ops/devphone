@@ -276,12 +276,13 @@
     if (browsers.indexOf('chrome') >= 0) grid.push(browserCell('chrome'));
     getApps().forEach(function (a) { grid.push(pwaCell(a)); });
 
-    var dock = [
-      stubCell('phone', 'Phone', function () { return icoPhone(false); }),
-      browserCell('safari'),
-      stubCell('messages', 'Messages', icoMessages),
-      stubCell('mail', 'Mail', icoMail)
-    ];
+    var dock = [];
+    if (device.formFactor !== 'tablet') {
+      dock.push(stubCell('phone', 'Phone', function () { return icoPhone(false); }));
+    }
+    dock.push(browserCell('safari'));
+    dock.push(stubCell('messages', 'Messages', icoMessages));
+    dock.push(stubCell('mail', 'Mail', icoMail));
 
     return '<div class="hs hs-ios">' +
              '<button class="hs-done">Done</button>' +
@@ -302,7 +303,10 @@
     ];
     getApps().forEach(function (a) { grid.push(pwaCell(a)); });
 
-    var dock = [stubCell('phone', 'Phone', function () { return icoPhone(true); })];
+    var dock = [];
+    if (device.formFactor !== 'tablet') {
+      dock.push(stubCell('phone', 'Phone', function () { return icoPhone(true); }));
+    }
     if (browsers.indexOf('samsung') >= 0) dock.push(browserCell('samsung'));
     dock.push(browserCell('chrome'));
     dock.push(stubCell('messages', 'Messages', icoMessages));

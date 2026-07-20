@@ -14,11 +14,11 @@
  *    (set synchronously by screen-preload from main state, refreshed by
  *    emulation.js on dom-ready and on standalone:set), falling back to
  *    window.__DEVPHONE__.standalone, default false.
- *  - navigator.platform = 'iPhone'
+ *  - navigator.platform = 'iPhone' or 'iPad' from the active form factor
  *  - navigator.maxTouchPoints = 5
  *  - navigator.vendor = 'Apple Computer, Inc.'
  *
- * Callers gate on iOS (UA contains 'iPhone' / device.os === 'ios'); the shim
+ * Callers gate on iOS (UA contains 'iPhone'/'iPad' or device.os === 'ios'); the shim
  * itself only guards against double application.
  */
 (function (global) {
@@ -34,6 +34,26 @@
 
     var nav = win.navigator;
     if (!nav) return false;
+
+    function platformName() {
+      try {
+        if (win.__DEVPHONE__ && win.__DEVPHONE__.os && win.__DEVPHONE__.os !== 'ios') {
+          return 'Linux armv8l';
+        }
+        if (win.__DEVPHONE__ && win.__DEVPHONE__.formFactor === 'tablet') return 'iPad';
+        if (String(nav.userAgent || '').indexOf('iPad') !== -1) return 'iPad';
+      } catch (e) {}
+      return 'iPhone';
+    }
+
+    function vendorName() {
+      try {
+        if (win.__DEVPHONE__ && win.__DEVPHONE__.os && win.__DEVPHONE__.os !== 'ios') {
+          return 'Google Inc.';
+        }
+      } catch (e) {}
+      return 'Apple Computer, Inc.';
+    }
 
     try {
       Object.defineProperty(nav, 'standalone', {
@@ -51,7 +71,7 @@
     try {
       Object.defineProperty(nav, 'platform', {
         configurable: true,
-        get: function () { return 'iPhone'; }
+        get: platformName
       });
     } catch (e) {}
 
@@ -65,7 +85,7 @@
     try {
       Object.defineProperty(nav, 'vendor', {
         configurable: true,
-        get: function () { return 'Apple Computer, Inc.'; }
+        get: vendorName
       });
     } catch (e) {}
 

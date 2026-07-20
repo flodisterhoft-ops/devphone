@@ -67,6 +67,22 @@ function ensureDevice() {
   return state.device;
 }
 
+function orientedDevice(device, orientation) {
+  if (!device) return device;
+  const next = device.formFactor === 'tablet' && orientation === 'landscape'
+    ? 'landscape'
+    : 'portrait';
+  const oriented = Object.assign({}, device, {
+    orientation: next,
+    viewport: Object.assign({}, device.viewport || {}),
+  });
+  if (next === 'landscape') {
+    oriented.viewport.width = device.viewport.height;
+    oriented.viewport.height = device.viewport.width;
+  }
+  return oriented;
+}
+
 function init(options) {
   state.selftest = !!(options && options.selftest);
 
@@ -96,9 +112,10 @@ function init(options) {
     return { ok: !!(res && res.ok), deviceId: device ? device.id : null, error: res && res.error };
   });
 
-  handle('device:set', async ({ deviceId, viewport }) => {
-    const device = updater.findDevice(deviceId);
-    if (!device) return { ok: false, error: 'unknown device: ' + deviceId };
+  handle('device:set', async ({ deviceId, viewport, orientation }) => {
+    const preset = updater.findDevice(deviceId);
+    if (!preset) return { ok: false, error: 'unknown device: ' + deviceId };
+    const device = orientedDevice(preset, orientation);
     state.device = device;
     // v0.1.1: optional content-viewport override — the renderer lays the page
     // out BETWEEN the phone's bars and tells us the visible area. Stored in
@@ -403,6 +420,8 @@ function init(options) {
       os: d ? d.os : '',
       deviceId: d ? d.id : '',
       deviceLabel: d ? d.label : '',
+      formFactor: d && d.formFactor === 'tablet' ? 'tablet' : 'phone',
+      orientation: d ? (d.orientation || 'portrait') : 'portrait',
       viewport: d ? d.viewport : null,
       dpr: d ? d.dpr : 1,
       themeColor: state.themeColor,

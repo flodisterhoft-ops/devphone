@@ -1,15 +1,16 @@
 'use strict';
 
 /*
- * update.js — the in-app auto-update UX (v0.1.6). Self-contained renderer
+ * update.js — the in-app auto-update UX. Self-contained renderer
  * module: listens to window.devphone.onAppUpdate (electron-updater events from
  * cloudupdate.js) and drives a phone-styled popup:
  *
  *   available  → "What's new" card + changelog + [Later] [Update now]
  *   progress   → download bar with live percent
- *   downloaded → confetti "Poof!" celebration + [Restart now]
+ *   downloaded → brief "Installing" confirmation, then automatic restart
  *
- * Buttons call devphone.appUpdateDownload() / appUpdateInstall(). The whole
+ * The Update button starts the download; completion calls appUpdateInstall()
+ * automatically so the complete update remains a one-click flow. The whole
  * thing is decoupled from the rest of the shell — it builds its own overlay and
  * a full-window confetti canvas. A demo mode (Ctrl+Shift+U, or window.dpuDemo)
  * runs the same UI with fake data so the flow can be previewed without a real
@@ -98,6 +99,7 @@
       viewProgress: ov.querySelector('.dpu-progress'),
       viewDone: ov.querySelector('.dpu-done'),
       doneSub: ov.querySelector('.dpu-done-sub'),
+      doneEmoji: ov.querySelector('.dpu-done-emoji'),
       barFill: ov.querySelector('.dpu-bar-fill'),
       pct: ov.querySelector('.dpu-pct'),
       speed: ov.querySelector('.dpu-speed'),
@@ -146,6 +148,7 @@
     els.actions.hidden = false;
     els.later.hidden = false;
     els.later.textContent = 'Later';
+    els.go.hidden = false;
     els.go.textContent = 'Update now';
     els.go.disabled = false;
     stopConfetti();
@@ -176,24 +179,38 @@
   }
 
   function toDone(version) {
-    cur.state = 'done';
+    cur.state = 'restarting';
     if (version) cur.version = version;
-    els.title.textContent = 'Update complete';
+    els.title.textContent = 'Installing update';
+    els.doneEmoji.textContent = '✨';
     els.doneSub.textContent = cur.version
-      ? 'DevPhone ' + cur.version + ' is ready.'
-      : 'A new version is ready.';
+      ? 'DevPhone ' + cur.version + ' will restart automatically.'
+      : 'DevPhone will restart automatically.';
     showView('done');
-    els.actions.hidden = false;
-    els.go.hidden = false;
-    els.go.disabled = false;
-    els.go.textContent = 'Restart now';
-    els.later.hidden = false;
-    els.later.textContent = 'Later';
+    els.actions.hidden = true;
     els.overlay.hidden = false;
     els.card.classList.remove('dpu-poof');
     void els.card.offsetWidth; // restart the pop animation
     els.card.classList.add('dpu-poof');
     startConfetti();
+    if (!cur.demo) {
+      setTimeout(function () {
+        if (window.devphone && devphone.appUpdateInstall) {
+          devphone.appUpdateInstall().then(function (r) {
+            if (r && r.ok === false) {
+              notify('The update is ready. Restart DevPhone to finish installing it.');
+              hide();
+            }
+          }).catch(function () {
+            notify('The update is ready. Restart DevPhone to finish installing it.');
+            hide();
+          });
+        } else {
+          notify('The update is ready. Restart DevPhone to finish installing it.');
+          hide();
+        }
+      }, 900);
+    }
   }
 
   function hide() {
@@ -215,9 +232,6 @@
           if (r && r.ok === false) { notify('Update download failed.'); hide(); }
         });
       }
-    } else if (cur.state === 'done') {
-      if (cur.demo) { notify('Demo — the real update would restart here.'); hide(); return; }
-      if (window.devphone && devphone.appUpdateInstall) devphone.appUpdateInstall();
     }
   }
 
@@ -338,15 +352,14 @@
   /* ---------- demo (Ctrl+Shift+U) ---------- */
 
   var DEMO_NOTES =
-    'Faster WebKit frame streaming\n' +
-    'Fixed the address bar on small screens\n' +
-    'New device: Galaxy S25 Ultra\n' +
-    'Smoother pinch-to-zoom\n' +
-    'Squashed a screenshot-clipboard bug';
+    'Separate Phone and Tablet picker\n' +
+    'Multiple iPad generations and Galaxy Tab S11 models\n' +
+    'Portrait and landscape tablet rotation\n' +
+    'One-click install and automatic restart';
 
   function runDemo() {
     cur.demo = true;
-    toAvailable('0.1.6', DEMO_NOTES);
+    toAvailable('0.1.8', DEMO_NOTES);
   }
 
   function runDemoProgress() {
@@ -356,7 +369,7 @@
       if (p >= 100) {
         p = 100; clearInterval(iv);
         setProgress(100, 3.2 * 1024 * 1024);
-        setTimeout(function () { toDone('0.1.6'); }, 400);
+        setTimeout(function () { toDone('0.1.8'); }, 400);
       } else {
         setProgress(p, (2 + Math.random() * 3) * 1024 * 1024);
       }
@@ -366,8 +379,8 @@
   // Force a specific stage with fake data (used by scripts/shot-update.js).
   window.dpuDemo = function (stage) {
     cur.demo = true;
-    if (stage === 'progress') { toAvailable('0.1.6', DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
-    else if (stage === 'done') { toDone('0.1.6'); }
+    if (stage === 'progress') { toAvailable('0.1.8', DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
+    else if (stage === 'done') { toDone('0.1.8'); }
     else runDemo();
   };
 

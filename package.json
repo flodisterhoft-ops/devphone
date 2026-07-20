@@ -1,8 +1,8 @@
 {
   "name": "devphone",
   "productName": "DevPhone",
-  "version": "0.1.7",
-  "description": "Phone-shaped mobile web simulator — realistic device frames, Chromium + true WebKit engines, home screen & PWA flow, element picker.",
+  "version": "0.1.8",
+  "description": "Phone and tablet web simulator — realistic device frames, Chromium + true WebKit, portrait/landscape, PWA flow, and element picker.",
   "main": "src/main/main.js",
   "author": "Florian Disterhoft",
   "license": "MIT",

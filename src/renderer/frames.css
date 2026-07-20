@@ -264,6 +264,33 @@
               inset 0 -1px 1px rgba(0, 0, 0, 0.4);
 }
 
+/* ---------- tablet bodies -------------------------------------------------
+   Tablets keep the same parameterized frame contract, with slim uniform
+   bezels and flatter corners. Their physical buttons are intentionally hidden
+   at this scale; phone-positioned side controls would be misleading.        */
+
+.body-tablet-apple { --band-w: 4px; }
+.body-tablet-apple .frame-band {
+  background: linear-gradient(150deg, #c8c9cd 0%, #8f9197 20%, #555960 52%,
+                                      #777a81 78%, #b9bbc0 100%);
+}
+.body-tablet-apple .frame-face {
+  background: linear-gradient(180deg, #111115 0%, #030304 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+              inset 0 1px 1px rgba(255, 255, 255, 0.08);
+}
+
+.body-tablet-android { --band-w: 3px; }
+.body-tablet-android .frame-band {
+  background: linear-gradient(150deg, #8d9299 0%, #62676e 22%, #34383e 54%,
+                                      #53585f 79%, #858a91 100%);
+}
+.body-tablet-android .frame-face {
+  background: linear-gradient(180deg, #0e0f12 0%, #020203 72%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.055);
+}
+.form-tablet .hw { display: none !important; }
+
 /* ---------- cutouts (drawn INSIDE the screen, above the page) -------------- */
 
 /* Dynamic Island */

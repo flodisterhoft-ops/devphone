@@ -78,9 +78,9 @@ const api = {
   // renderer → main conveniences
   devicesList: () => invoke('devices:list'),
   screenAttach: (webContentsId) => invoke('screen:attach', { webContentsId }),
-  // v0.1.1: optional second arg {width,height} — content-viewport override
-  // (page laid out between the bars); omit it to restore the full viewport.
-  deviceSet: (deviceId, viewport) => invoke('device:set', { deviceId, viewport }),
+  // Optional content viewport plus tablet orientation. Omit both for the
+  // preset's native portrait viewport.
+  deviceSet: (deviceId, viewport, orientation) => invoke('device:set', { deviceId, viewport, orientation }),
   engineSet: (mode) => invoke('engine:set', { mode }),
   nav: (action, url) => invoke('nav', { action, url }),
   standaloneSet: (onFlag, themeColor) => invoke('standalone:set', { on: onFlag, themeColor }),

@@ -5,7 +5,7 @@
  *   npx electron scripts/shots.js <outDir> <demoHtmlPath>
  * Serves the demo page on localhost (so the address bar reads like a real dev
  * preview), drives the shell (home screen → open site → update popup →
- * settings), and writes cropped phone shots + full-window workspace shots.
+ * settings → phone/tablet picker → tablet rotation), and writes product shots.
  */
 
 const path = require('path');
@@ -104,15 +104,38 @@ app.whenReady().then(async () => {
   await delay(500);
   save(await shot(win), 'update.png');
 
-  // 5) an Android device home screen (best effort)
+  // 5) Android phone + tablet picker + tablet portrait/landscape
   try {
     await js(win, `window.dpuDemo && (document.getElementById('dpu-overlay').hidden = true)`);
     const switched = await js(win, `(() => {
-      const b = document.getElementById('btn-device'); if (b) b.click();
+      const b = document.getElementById('btn-device');
+      if (b) b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      const kind = document.querySelector('.dev-kind[data-kind="phone"]'); if (kind) kind.click();
       const row = document.querySelector('.dev-row[data-id*="galaxy"]') || document.querySelector('.dev-row[data-id*="pixel"]');
       if (row) { row.click(); return row.getAttribute('data-id'); } return null;
     })()`);
     if (switched) { await delay(1500); save(cropPhone(await shot(win), await phoneRect(win)), 'android.png'); console.log('android device: ' + switched); }
+
+    await js(win, `(() => {
+      const b = document.getElementById('btn-device');
+      if (b) b.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      const kind = document.querySelector('.dev-kind[data-kind="tablet"]'); if (kind) kind.click();
+    })()`);
+    await delay(500);
+    save(await shot(win), 'tablet-picker.png');
+
+    const tablet = await js(win, `(() => {
+      const row = document.querySelector('.dev-row[data-id="galaxy-tab-s11-ultra"]');
+      if (row) { row.click(); return row.getAttribute('data-id'); } return null;
+    })()`);
+    if (tablet) {
+      await delay(1200);
+      save(cropPhone(await shot(win), await phoneRect(win)), 'tablet-portrait.png');
+      await js(win, `document.getElementById('btn-rotate').click()`);
+      await delay(1200);
+      save(cropPhone(await shot(win), await phoneRect(win)), 'tablet-landscape.png');
+      console.log('tablet device: ' + tablet);
+    }
   } catch (e) { console.error('android shot skipped:', e.message); }
 
   app.exit(0);

@@ -1,7 +1,7 @@
 # DevPhone — Architecture Contract
 
-Desktop phone simulator for mobile-web testing (Windows-first, Electron).
-A frameless, transparent, draggable window IS the phone: realistic drawn
+Desktop phone and tablet simulator for mobile-web testing (Windows-first, Electron).
+A frameless, transparent, draggable window IS the device: realistic drawn
 body, OS home screen, browser apps, PWA install flow, element picker,
 screenshots, touch/pinch. Two engines: Chromium emulation (instant) and
 true WebKit via Playwright (faithful Safari-family rendering).
@@ -41,6 +41,7 @@ change IPC names, file ownership, or the device schema — extend only.
     {
       "id": "iphone-16-pro-max",
       "label": "iPhone 16 Pro Max",
+      "formFactor": "phone",
       "brand": "apple",
       "os": "ios",
       "osVersion": "26",
@@ -63,8 +64,13 @@ change IPC names, file ownership, or the device schema — extend only.
 ```
 
 - `cutout`: `dynamic-island` | `notch` | `punch-hole` | `none`
+- `formFactor`: `phone` (also the backward-compatible default when omitted) |
+  `tablet`. The picker uses this field to keep the two catalogs separate.
 - `cornerRadius`: CSS px radius of the SCREEN corners at 1:1 scale.
-- `bodyStyle`: `titanium-pro` | `aluminum` | `glass-android` | `budget-android`
+- `bodyStyle`: `titanium-pro` | `aluminum` | `glass-android` | `budget-android` |
+  `tablet-apple` | `tablet-android`
+- `statusBarHeight`, `safeArea`, and `gestureNavigation` are optional tablet
+  overrides used by the shell and emulation layer.
 - `uaModel`: Android build model for UA-CH (e.g. `SM-S938B`); empty on iOS.
 - `browsers`: which browser apps appear on its home screen.
   iOS → `safari` (+`chrome` cosmetic; both render identically).
@@ -104,8 +110,10 @@ Renderer → main (invoke):
 - `screen:attach {webContentsId}` → main attaches debugger to the webview
   and applies current device emulation. Renderer calls once webview is
   `dom-ready`.
-- `device:set {deviceId}` → main re-applies emulation (metrics, UA, touch,
-  safe areas). Returns the device object.
+- `device:set {deviceId, viewport?, orientation?}` → main re-applies emulation
+  (metrics, UA, touch, safe areas). `orientation` is `portrait` or `landscape`;
+  landscape is accepted for tablets and swaps the full screen dimensions.
+  Returns the oriented device object.
 - `engine:set {mode}` — `chromium` | `webkit`. WebKit mode: main launches
   Playwright WebKit (context with device viewport/UA/touch), navigates to
   the current URL, starts frame streaming. Returns `{ok, mode}` (falls
@@ -331,7 +339,7 @@ New/extended IPC (renderer → main, invoke; all exposed on `window.devphone`):
   mode (ios-shims pins it — identity, not input pipeline).
   Preload convenience: `devphone.inputSet(mode)`.
 
-- `device:set {deviceId, viewport?}` — extended. Optional
+- `device:set {deviceId, viewport?, orientation?}` — extended. Optional
   `viewport:{width,height}` = the CONTENT viewport in CSS px: the renderer
   now lays the page out BETWEEN the phone's bars (status bar, browser
   chrome, Android nav bar) and passes the visible area here. When present it
@@ -342,7 +350,9 @@ New/extended IPC (renderer → main, invoke; all exposed on `window.devphone`):
   it — and is CLEARED by any `device:set` without a viewport. Backward
   compatible: old calls behave exactly as before. WebKit mode: the override
   is also used for the Playwright context viewport.
-  Preload convenience: `devphone.deviceSet(deviceId, viewport?)`.
+  `orientation:'landscape'` swaps a tablet's full viewport and adds CDP
+  `screenOrientation:{type:'landscapePrimary',angle:90}`; phones stay portrait.
+  Preload convenience: `devphone.deviceSet(deviceId, viewport?, orientation?)`.
 
 Picker (`src/inject/picker.js`) — rewritten as a Chrome-DevTools-style
 inspector. Contract unchanged: `window.__DEVPHONE_PICKER__(on)` arm/disarm
@@ -777,7 +787,9 @@ appUpdateDownload / appUpdateInstall / onAppUpdate(cb)`.
 
 `src/renderer/update.js` (+ `.dpu-*` in shell.css; loaded last in index.html) —
 self-contained overlay: "What's new" card + changelog, download progress bar,
-then a full-window confetti "Poof!" celebration + Restart. It is a full-window
+then a brief installation/confetti state which calls `appupdate:install`
+automatically. Update now is the only required click; the app installs, quits,
+and relaunches itself. It is a full-window
 modal, so `wireClickThrough`'s `overVisible()` returns true whenever
 `#dpu-overlay` is shown (keeps the window interactive for its buttons). Demo:
 Ctrl+Shift+U, or `window.dpuDemo('available'|'progress'|'done')` (used by
@@ -798,8 +810,8 @@ embeds it into latest.yml (→ electron-updater `releaseNotes`, rendered as the
 changelog) and the GitHub release body. `scripts/release.js` (`npm run release`)
 pulls the GitHub token from the `gh` CLI, regenerates notes, gates on WebKit,
 then `electron-builder --win nsis --publish always`. Workflow: bump
-`package.json` version → `npm run release` → the brother's installed app offers
-the update on next launch. `npm run dist` stays local-only (nsis + portable, no
+`package.json` version → `npm run release` → installed copies offer the update
+on their next launch. `npm run dist` stays local-only (nsis + portable, no
 publish); the auto-updatable artifact is the NSIS installer.
 
 ### App icon
@@ -810,3 +822,18 @@ shipped for the runtime BrowserWindow icon). `win.signExecutable: false` keeps
 icon+metadata embedding (pure-JS resedit) while skipping only codesign — see the
 Packaging section. `app.setAppUserModelId('com.devphone.app')` sets the taskbar
 identity.
+
+## v0.1.8 extensions (tablets, rotation, one-click update completion)
+
+- `formFactor:'tablet'` presets live behind a separate Device → Tablet category:
+  multiple iPad generations plus Galaxy Tab S11 and S11 Ultra.
+- Renderer orientation is stored per tablet in
+  `devphone.orientation.<deviceId>`. Rotation swaps the device viewport, frame,
+  window bounds, home-grid layout, and content viewport, then reapplies the
+  active engine without returning home.
+- Main clones the immutable catalog preset into an oriented device. Chromium
+  receives full rotated `screenWidth/screenHeight` plus `screenOrientation`;
+  WebKit recreates its context with the rotated content viewport.
+- Once an accepted update finishes downloading, the renderer immediately calls
+  `quitAndInstall(false,true)` after a short visible confirmation. The existing
+  `autoInstallOnAppQuit` remains the safety net.

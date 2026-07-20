@@ -10,7 +10,7 @@
  * live — seeded synchronously below via ipcRenderer.sendSync and refreshed
  * by the main process (emulation.js) on dom-ready / standalone:set.
  *
- * iOS shims install ONLY when the UA contains 'iPhone' (the UA override is
+ * iOS shims install ONLY when the UA contains 'iPhone' or 'iPad' (the UA override is
  * already active at preload time). Single source of the shim code is
  * src/inject/ios-shims.js — require()'d when node is available (the module
  * auto-applies to the shared window), otherwise fetched as text from main
@@ -41,7 +41,7 @@
 
   // ---- iOS shims (gated on the active UA override) ----
   try {
-    if (String(navigator.userAgent).indexOf('iPhone') !== -1) {
+    if (/iPhone|iPad/.test(String(navigator.userAgent))) {
       let applied = false;
       // Preferred: require the module — it auto-applies to this window.
       try {

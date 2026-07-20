@@ -141,6 +141,8 @@ function buildInitScript(device, standalone) {
     os: device.os || '',
     deviceId: device.id || '',
     deviceLabel: device.label || '',
+    formFactor: device.formFactor === 'tablet' ? 'tablet' : 'phone',
+    orientation: device.orientation || 'portrait',
     viewport: device.viewport || null,
     dpr: device.dpr || 1,
   };
@@ -620,6 +622,7 @@ async function getEvidence() {
     if (!wk.active || !wk.page) return null;
     const info = await wk.page.evaluate(
       '({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio,' +
+      ' screen: [screen.width, screen.height], orientation: screen.orientation && screen.orientation.type,' +
       ' ua: navigator.userAgent, platform: navigator.platform,' +
       ' touch: navigator.maxTouchPoints, standalone: navigator.standalone, url: location.href })');
     info.engine = 'webkit';

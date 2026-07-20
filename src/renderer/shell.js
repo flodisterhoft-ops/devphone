@@ -18,7 +18,8 @@
   var RAIL_W = 86;       // control rail width
   var GAP = 12;          // gap between phone and rail
   var MIN_WIN_H = 600;   // rail needs at least this
-  var SCALES = [0.75, 1, 1.25];
+  var PHONE_SCALES = [0.75, 1, 1.25];
+  var TABLET_SCALES = [0.5, 0.75, 1];
   var NAV_H = 44;            // Android 3-button navigation bar height (CSS px @1:1)
   var ANDROID_PWA_SB = 28;   // black status strip in Android standalone apps
 
@@ -32,7 +33,9 @@
     // classic home-button body (iPhone SE): symmetric big forehead/chin
     'classic-button': { top: 88, side: 19, bottom: 88, body: function ()  { return 58; } },
     'glass-android':  { top: 13, side: 12, bottom: 16, body: function (r) { return r + 11; } },
-    'budget-android': { top: 18, side: 14, bottom: 24, body: function (r) { return r + 12; } }
+    'budget-android': { top: 18, side: 14, bottom: 24, body: function (r) { return r + 12; } },
+    'tablet-apple':   { top: 12, side: 12, bottom: 12, body: function (r) { return r + 10; } },
+    'tablet-android': { top: 10, side: 10, bottom: 10, body: function (r) { return r + 8; } }
   };
 
   // used when the engine half isn't running yet (pure UI preview)
@@ -68,7 +71,8 @@
     inputMode: 'touch',    // 'touch' | 'mouse' (global)
     alwaysOnTop: false,    // window pinning (global)
     contentViewport: null, // {width,height} of the honest content area (unscaled)
-    clickThrough: false    // v0.1.5: cursor is over an INVISIBLE window region
+    clickThrough: false,   // v0.1.5: cursor is over an INVISIBLE window region
+    devicePickerCategory: null // null category prompt | 'phone' | 'tablet'
   };
 
   /* ---------- tiny pub/sub ------------------------------------------------ */
@@ -210,7 +214,49 @@
     return BODY_METRICS[device.bodyStyle] || BODY_METRICS['glass-android'];
   }
 
+  function formFactorOf(device) {
+    return device && device.formFactor === 'tablet' ? 'tablet' : 'phone';
+  }
+
+  function savedOrientationFor(device) {
+    if (formFactorOf(device) !== 'tablet') return 'portrait';
+    var saved = '';
+    try { saved = localStorage.getItem('devphone.orientation.' + device.id) || ''; } catch (e) {}
+    return saved === 'landscape' ? 'landscape' : 'portrait';
+  }
+
+  function orientedDevice(device, orientation) {
+    if (!device) return device;
+    var next = formFactorOf(device) === 'tablet' && orientation === 'landscape'
+      ? 'landscape'
+      : 'portrait';
+    var copy = Object.assign({}, device, { orientation: next });
+    copy.viewport = Object.assign({}, device.viewport || {});
+    if (next === 'landscape') {
+      copy.viewport.width = device.viewport.height;
+      copy.viewport.height = device.viewport.width;
+    }
+    return copy;
+  }
+
+  function scalesFor(device) {
+    return formFactorOf(device) === 'tablet' ? TABLET_SCALES : PHONE_SCALES;
+  }
+
+  function scaleStorageKey(device) {
+    return formFactorOf(device) === 'tablet' ? 'devphone.scale.tablet' : 'devphone.scale';
+  }
+
+  function savedScaleFor(device) {
+    var allowed = scalesFor(device);
+    var saved = NaN;
+    try { saved = parseFloat(localStorage.getItem(scaleStorageKey(device))); } catch (e) {}
+    if (allowed.indexOf(saved) >= 0) return saved;
+    return formFactorOf(device) === 'tablet' ? 0.5 : 1;
+  }
+
   function sbHeight(device) {
+    if (device.statusBarHeight) return Number(device.statusBarHeight) || 0;
     if (device.os === 'ios') {
       if (device.cutout === 'dynamic-island') return 59;
       if (device.cutout === 'notch') return 47;
@@ -301,7 +347,12 @@
     var d = state.device;
     if (!d || !el.statusbar) return;
     var html;
-    if (d.os === 'ios' && d.cutout === 'none') {
+    if (d.os === 'ios' && formFactorOf(d) === 'tablet') {
+      html = '<div class="sb sb-ipad">' +
+               '<span class="sb-time js-clock">' + fmtTime(d.os) + '</span>' +
+               '<span class="sb-right">' + svgWifi() + svgBattery() + '</span>' +
+             '</div>';
+    } else if (d.os === 'ios' && d.cutout === 'none') {
       html = '<div class="sb sb-classic">' +
                '<span class="sb-carrier">DevPhone ' + svgWifi() + '</span>' +
                '<span class="sb-time js-clock">' + fmtTime(d.os) + '</span>' +
@@ -413,10 +464,14 @@
     var w = Math.round(d.viewport.width);
     var h = Math.round(d.viewport.height - ins.top - ins.bottom);
     state.contentViewport = { width: w, height: h };
-    var key = d.id + ':' + w + 'x' + h;
+    var key = d.id + ':' + (d.orientation || 'portrait') + ':' + w + 'x' + h;
     if (key === lastVp) return;
     lastVp = key;
-    invoke('device:set', { deviceId: d.id, viewport: { width: w, height: h } })
+    invoke('device:set', {
+      deviceId: d.id,
+      orientation: d.orientation || 'portrait',
+      viewport: { width: w, height: h }
+    })
       .then(function () {
         // input mode must survive every re-emulation
         invoke('input:set', { mode: state.inputMode });
@@ -584,7 +639,7 @@
         '<button data-v="3btn" class="' + (state.nav3 ? 'on' : '') + '">3 buttons</button>' +
       '</div>';
     } else {
-      html += '<div class="set-note">iPhones always use gesture navigation</div>';
+      html += '<div class="set-note">Apple devices always use gesture navigation</div>';
     }
     html += '<div class="set-sec">Address bar · Chrome</div>' +
       '<div class="set-seg" data-set="addr">' +
@@ -597,7 +652,7 @@
       '</button>';
     html += '<div class="set-sec">Preview</div>' +
       '<button class="set-row" id="set-wkwin">🧭 Open in WebKit window</button>' +
-      '<div class="set-note">Real WebKit, full speed — no phone frame</div>';
+      '<div class="set-note">Real WebKit, full speed — no device frame</div>';
     var ver = (window.devphone && devphone.version) || '';
     html += '<div class="set-sec">About</div>' +
       '<button class="set-row" id="set-update">🔄 Check for updates' +
@@ -670,7 +725,8 @@
     }
     var m = metricsFor(device);
     var ph = el.phone;
-    ph.className = 'body-' + device.bodyStyle + ' brand-' + device.brand + ' os-' + device.os;
+    ph.className = 'body-' + device.bodyStyle + ' brand-' + device.brand + ' os-' + device.os +
+      ' form-' + formFactorOf(device) + ' orientation-' + (device.orientation || 'portrait');
     var st = ph.style;
     st.setProperty('--screen-w', device.viewport.width + 'px');
     st.setProperty('--screen-h', device.viewport.height + 'px');
@@ -685,6 +741,13 @@
     renderCutout();
     layout();
     if (el.deviceLabel) el.deviceLabel.textContent = device.label;
+    if (el.btnRotate) {
+      var tablet = formFactorOf(device) === 'tablet';
+      var landscape = device.orientation === 'landscape';
+      el.btnRotate.style.display = tablet ? '' : 'none';
+      el.btnRotate.title = landscape ? 'Rotate tablet to portrait' : 'Rotate tablet to landscape';
+      el.btnRotate.setAttribute('aria-label', el.btnRotate.title);
+    }
     try { localStorage.setItem('devphone.device', device.id); } catch (e) {}
     if (DP.home) DP.home.render();
     updateHomeIndicator();
@@ -698,12 +761,31 @@
     var device = null;
     state.devices.forEach(function (d) { if (d.id === id) device = d; });
     if (!device || (state.device && state.device.id === id)) return;
+    var oldFormFactor = formFactorOf(state.device);
+    if (formFactorOf(device) !== oldFormFactor) state.scale = savedScaleFor(device);
     goHome(true);
+    device = orientedDevice(device, savedOrientationFor(device));
     applyDevice(device);
+    updateScaleBtn();
     if (state.attached) { lastVp = ''; scheduleViewport(true); }
     delete state.newIds[id];
     renderDevicePopover();
-    toast('📱 ' + device.label + ' — ' + device.viewport.width + '×' + device.viewport.height + ' @' + device.dpr + 'x');
+    toast((formFactorOf(device) === 'tablet' ? '▭ ' : '📱 ') + device.label + ' — ' +
+      device.viewport.width + '×' + device.viewport.height + ' @' + device.dpr + 'x');
+  }
+
+  function rotateTablet() {
+    var current = state.device;
+    if (formFactorOf(current) !== 'tablet') return;
+    var base = null;
+    state.devices.forEach(function (d) { if (d.id === current.id) base = d; });
+    if (!base) return;
+    var next = current.orientation === 'landscape' ? 'portrait' : 'landscape';
+    try { localStorage.setItem('devphone.orientation.' + base.id, next); } catch (e) {}
+    applyDevice(orientedDevice(base, next));
+    lastVp = '';
+    if (state.attached) scheduleViewport(true);
+    toast(next === 'landscape' ? '↔ Landscape' : '↕ Portrait', 1500);
   }
 
   /* ---------- home indicator / gesture ------------------------------------- */
@@ -711,9 +793,9 @@
   function updateHomeIndicator() {
     var d = state.device;
     // 3-button phones have no gesture pill / swipe area
-    var gesturePhone = d && d.cutout !== 'none' && !nav3On();
-    if (el.homeIndicator) el.homeIndicator.hidden = !gesturePhone;
-    if (el.homeGesture) el.homeGesture.hidden = !(gesturePhone && state.app);
+    var gestureDevice = d && (d.gestureNavigation === true || d.cutout !== 'none') && !nav3On();
+    if (el.homeIndicator) el.homeIndicator.hidden = !gestureDevice;
+    if (el.homeGesture) el.homeGesture.hidden = !(gestureDevice && state.app);
   }
 
   function goHome(silent) {
@@ -1670,13 +1752,25 @@
 
   /* ---------- device popover ------------------------------------------------ */
 
-  // mini phone illustration (~22×38): body in the device accentColor, the
-  // REAL cutout shape, a home-button dot only for classic-button bodies, and
-  // the screen filled with that device's wallpaper colorway — phones are
-  // recognizable at a glance.
-  function miniPhoneSvg(d) {
+  // Compact device illustration: phones stay tall and narrow while tablets
+  // use their wider silhouette. Both share the real device wallpaper colorway.
+  function miniDeviceSvg(d) {
     var gid = 'mp-' + String(d.id || '').replace(/[^a-z0-9]/gi, '');
+    var tablet = formFactorOf(d) === 'tablet';
     var classic = d.bodyStyle === 'classic-button';
+    if (tablet) {
+      var tabletWp = wallpaperFor(d);
+      var tabletStops = tabletWp.stops.map(function (c, i, arr) {
+        var tabletOff = arr.length < 2 ? 0 : (i / (arr.length - 1));
+        return '<stop offset="' + tabletOff.toFixed(2) + '" stop-color="' + c + '"/>';
+      }).join('');
+      return '<svg class="dev-mini dev-mini-tablet" width="28" height="38" viewBox="0 0 28 38" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<defs><linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1">' + tabletStops + '</linearGradient></defs>' +
+        '<rect x=".75" y=".75" width="26.5" height="36.5" rx="3.5" fill="' + esc(d.accentColor || '#2c2c2e') + '" stroke="rgba(255,255,255,.28)" stroke-width=".8"/>' +
+        '<rect x="2.5" y="2.5" width="23" height="33" rx="2.4" fill="url(#' + gid + ')"/>' +
+        '<circle cx="14" cy="3.7" r=".65" fill="#08080a"/>' +
+        '</svg>';
+    }
     var scrY = classic ? 5.5 : 2.6;
     var scrH = classic ? 27 : 32.8;
     var rx = Math.max(1.5, Math.min(5, (d.cornerRadius || 0) / 14));
@@ -1739,27 +1833,75 @@
     });
   }
 
-  function renderDevicePopover() {
-    var pop = el.devicePopover;
-    if (!pop) return;
-    var rows = state.devices.map(function (d) {
+  function deviceRowsHtml(devices) {
+    return devices.map(function (d) {
       var cur = state.device && d.id === state.device.id;
       var badges = (state.newIds[d.id] ? '<em class="new-badge">NEW</em>' : '') +
                    (d.estimated ? '<em class="est-badge">est.</em>' : '');
       return '<button class="dev-row' + (cur ? ' current' : '') + '" data-id="' + esc(d.id) + '">' +
-               miniPhoneSvg(d) +
+               miniDeviceSvg(d) +
                '<span class="dev-col">' +
                  '<span class="dev-name">' + esc(d.label) + badges + '</span>' +
                  '<span class="dev-sub">' + d.viewport.width + '×' + d.viewport.height +
-                   ' @' + d.dpr + 'x · ' + (d.os === 'ios' ? 'iOS' : 'Android') + ' ' + esc(d.osVersion || '') +
+                   ' @' + d.dpr + 'x · ' + (d.os === 'ios' ? (formFactorOf(d) === 'tablet' ? 'iPadOS' : 'iOS') : 'Android') +
+                   ' ' + esc(d.osVersion || '') +
                  '</span>' +
                '</span>' +
              '</button>';
     }).join('');
-    pop.innerHTML =
-      '<button class="dev-check" id="dev-check-row"' +
+  }
+
+  function deviceKindIcon(kind) {
+    if (kind === 'tablet') {
+      return '<svg viewBox="0 0 34 34" aria-hidden="true"><rect x="5.5" y="2.5" width="23" height="29" rx="4.5"/>' +
+        '<circle cx="17" cy="5.2" r="1"/></svg>';
+    }
+    return '<svg viewBox="0 0 34 34" aria-hidden="true"><rect x="9" y="2" width="16" height="30" rx="5"/>' +
+      '<rect x="14" y="4.5" width="6" height="1.5" rx=".75"/></svg>';
+  }
+
+  function renderDeviceCategories(pop) {
+    var phoneCount = state.devices.filter(function (d) { return formFactorOf(d) === 'phone'; }).length;
+    var tabletCount = state.devices.filter(function (d) { return formFactorOf(d) === 'tablet'; }).length;
+    var currentKind = formFactorOf(state.device);
+    function card(kind, title, subtitle, count) {
+      return '<button class="dev-kind' + (currentKind === kind ? ' current' : '') + '" data-kind="' + kind + '">' +
+        '<span class="dev-kind-icon">' + deviceKindIcon(kind) + '</span>' +
+        '<span class="dev-kind-copy"><strong>' + title + '</strong><span>' + subtitle + '</span></span>' +
+        '<span class="dev-kind-count">' + count + '</span><span class="dev-kind-next">›</span>' +
+      '</button>';
+    }
+    pop.innerHTML = '<div class="dev-picker-title">Choose a device</div>' +
+      '<div class="dev-picker-note">What do you want to preview?</div>' +
+      card('phone', 'Phone', 'iPhone, Galaxy & Pixel', phoneCount) +
+      card('tablet', 'Tablet', 'iPad & Galaxy Tab', tabletCount);
+  }
+
+  function renderDeviceList(pop, kind) {
+    var devices = state.devices.filter(function (d) { return formFactorOf(d) === kind; });
+    var html = '<div class="dev-list-head"><button class="dev-back" aria-label="Back">‹</button>' +
+      '<div><div class="dev-list-title">' + (kind === 'tablet' ? 'Tablets' : 'Phones') + '</div>' +
+      '<div class="dev-list-count">' + devices.length + ' devices</div></div></div>';
+    if (kind === 'phone') {
+      html += '<button class="dev-check" id="dev-check-row"' +
         (checkState.phase === 'busy' ? ' disabled' : '') + '>' + checkRowHtml() + '</button>' +
-      rows;
+        deviceRowsHtml(devices);
+    } else {
+      var apple = devices.filter(function (d) { return d.brand === 'apple'; });
+      var samsung = devices.filter(function (d) { return d.brand === 'samsung'; });
+      var other = devices.filter(function (d) { return d.brand !== 'apple' && d.brand !== 'samsung'; });
+      if (apple.length) html += '<div class="dev-section">Apple iPad</div>' + deviceRowsHtml(apple);
+      if (samsung.length) html += '<div class="dev-section">Samsung Galaxy Tab</div>' + deviceRowsHtml(samsung);
+      if (other.length) html += '<div class="dev-section">Other tablets</div>' + deviceRowsHtml(other);
+    }
+    pop.innerHTML = html;
+  }
+
+  function renderDevicePopover() {
+    var pop = el.devicePopover;
+    if (!pop) return;
+    if (state.devicePickerCategory) renderDeviceList(pop, state.devicePickerCategory);
+    else renderDeviceCategories(pop);
   }
 
   function toggleDevicePopover(show) {
@@ -1768,7 +1910,9 @@
     var willShow = (show != null) ? show : pop.hidden;
     pop.hidden = !willShow;
     if (willShow) {
+      state.devicePickerCategory = null;
       renderDevicePopover();
+      pop.scrollTop = 0;
       if (el.settingsPopover) el.settingsPopover.hidden = true;
     }
     updateCatcher();
@@ -1797,6 +1941,19 @@
 
     if (el.devicePopover) el.devicePopover.addEventListener('click', function (e) {
       if (e.target.closest('#dev-check-row')) { runUpdaterCheck(); return; }
+      var kind = e.target.closest('.dev-kind');
+      if (kind) {
+        state.devicePickerCategory = kind.getAttribute('data-kind');
+        renderDevicePopover();
+        el.devicePopover.scrollTop = 0;
+        return;
+      }
+      if (e.target.closest('.dev-back')) {
+        state.devicePickerCategory = null;
+        renderDevicePopover();
+        el.devicePopover.scrollTop = 0;
+        return;
+      }
       var row = e.target.closest('.dev-row');
       if (!row) return;
       toggleDevicePopover(false);
@@ -1837,9 +1994,10 @@
     });
 
     if (el.btnScale) el.btnScale.addEventListener('click', function () {
-      var i = SCALES.indexOf(state.scale);
-      state.scale = SCALES[(i + 1) % SCALES.length];
-      try { localStorage.setItem('devphone.scale', String(state.scale)); } catch (e) {}
+      var allowed = scalesFor(state.device);
+      var i = allowed.indexOf(state.scale);
+      state.scale = allowed[(i + 1) % allowed.length];
+      try { localStorage.setItem(scaleStorageKey(state.device), String(state.scale)); } catch (e) {}
       updateScaleBtn();
       layout();
     });
@@ -1850,9 +2008,7 @@
     if (el.btnHome) el.btnHome.addEventListener('click', function () { goHome(); });
     if (el.hwHomeButton) el.hwHomeButton.addEventListener('click', function () { goHome(); });
 
-    // v1: the contract's device:set only accepts {deviceId} — no orientation
-    // parameter — so rotation is hidden until the engine supports it.
-    if (el.btnRotate) el.btnRotate.style.display = 'none';
+    if (el.btnRotate) el.btnRotate.addEventListener('click', rotateTablet);
 
     window.addEventListener('keydown', function (e) {
       if (e.ctrlKey && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
@@ -2280,10 +2436,6 @@
         toast('⚠️ Engine not connected — UI preview mode');
       }
 
-      var savedScale = NaN;
-      try { savedScale = parseFloat(localStorage.getItem('devphone.scale')); } catch (e) {}
-      state.scale = SCALES.indexOf(savedScale) >= 0 ? savedScale : 1;
-
       var savedId = null;
       try { savedId = localStorage.getItem('devphone.device'); } catch (e) {}
       // selftest can pin a device: ?device=<id>
@@ -2293,7 +2445,9 @@
       } catch (e) {}
       var device = null;
       state.devices.forEach(function (d) { if (d.id === savedId) device = d; });
-      applyDevice(device || state.devices[0]);
+      device = device || state.devices[0];
+      state.scale = savedScaleFor(device);
+      applyDevice(orientedDevice(device, savedOrientationFor(device)));
 
       updateScaleBtn();
       updateEngineBtn();
