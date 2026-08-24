@@ -352,13 +352,14 @@
   /* ---------- demo (Ctrl+Shift+U) ---------- */
 
   var DEMO_NOTES =
-    'Regular tablets now open larger at 75%\n' +
-    'Oversized Ultra and iPad Pro models still fit at 50%\n' +
-    'Zoom is remembered separately for every tablet';
+    'Attach a DevPhone to a Windows task or window\n' +
+    'Run multiple isolated DevPhone profiles at once\n' +
+    'Home search, AM/PM clock, and transient-toast fixes';
+  var DEMO_VERSION = (window.devphone && devphone.version) || '0.2.0';
 
   function runDemo() {
     cur.demo = true;
-    toAvailable('0.1.9', DEMO_NOTES);
+    toAvailable(DEMO_VERSION, DEMO_NOTES);
   }
 
   function runDemoProgress() {
@@ -368,7 +369,7 @@
       if (p >= 100) {
         p = 100; clearInterval(iv);
         setProgress(100, 3.2 * 1024 * 1024);
-        setTimeout(function () { toDone('0.1.9'); }, 400);
+        setTimeout(function () { toDone(DEMO_VERSION); }, 400);
       } else {
         setProgress(p, (2 + Math.random() * 3) * 1024 * 1024);
       }
@@ -378,8 +379,8 @@
   // Force a specific stage with fake data (used by scripts/shot-update.js).
   window.dpuDemo = function (stage) {
     cur.demo = true;
-    if (stage === 'progress') { toAvailable('0.1.9', DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
-    else if (stage === 'done') { toDone('0.1.9'); }
+    if (stage === 'progress') { toAvailable(DEMO_VERSION, DEMO_NOTES); toProgress(); setProgress(46, 2.6 * 1024 * 1024); }
+    else if (stage === 'done') { toDone(DEMO_VERSION); }
     else runDemo();
   };
 

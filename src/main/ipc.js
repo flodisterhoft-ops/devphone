@@ -34,6 +34,9 @@ const state = {
   mouseIgnored: false, // v0.1.5: click-through state (shell:ignoreMouse)
 };
 
+let profileManager = null;
+let attachmentManager = null;
+
 function send(channel, payload) {
   try {
     const win = state.shellWindow;
@@ -85,6 +88,8 @@ function orientedDevice(device, orientation) {
 
 function init(options) {
   state.selftest = !!(options && options.selftest);
+  profileManager = (options && options.profileManager) || null;
+  attachmentManager = (options && options.attachmentManager) || null;
 
   emulation.init({ state, send });
   webkit.init({ state, send });
@@ -94,6 +99,30 @@ function init(options) {
 
   handle('devices:list', async () => {
     return { devices: updater.listDevices() };
+  });
+
+  handle('profile:get', async () => {
+    return { ok: true, profile: profileManager ? profileManager.info : { id: 'default', name: 'DevPhone', isDefault: true } };
+  });
+
+  handle('profile:new', async ({ name }) => {
+    if (!profileManager) return { ok: false, error: 'profile manager unavailable' };
+    return profileManager.launchNew({ name });
+  });
+
+  handle('attachment:get', async () => {
+    if (!attachmentManager) return { ok: false, error: 'attachment manager unavailable' };
+    return { ok: true, status: attachmentManager.getStatus() };
+  });
+
+  handle('attachment:attachLast', async () => {
+    if (!attachmentManager) return { ok: false, error: 'attachment manager unavailable' };
+    return attachmentManager.attachLast();
+  });
+
+  handle('attachment:detach', async () => {
+    if (!attachmentManager) return { ok: false, error: 'attachment manager unavailable' };
+    return attachmentManager.detach();
   });
 
   handle('screen:attach', async ({ webContentsId }) => {
@@ -392,7 +421,11 @@ function init(options) {
 
   handle('shell:minimize', async () => {
     const win = state.shellWindow;
-    if (win && !win.isDestroyed()) win.minimize();
+    if (win && !win.isDestroyed()) {
+      if (attachmentManager) attachmentManager.noteManualMinimize();
+      try { win.webContents.send('shell:visibility', { visible: false, reason: 'minimize' }); } catch (e) {}
+      win.minimize();
+    }
     return { ok: true };
   });
 

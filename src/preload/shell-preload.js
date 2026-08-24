@@ -13,6 +13,11 @@ const { pathToFileURL } = require('url');
 
 const INVOKE_CHANNELS = [
   'devices:list',
+  'profile:get',
+  'profile:new',
+  'attachment:get',
+  'attachment:attachLast',
+  'attachment:detach',
   'screen:attach',
   'device:set',
   'engine:set',
@@ -48,6 +53,8 @@ const EVENT_CHANNELS = [
   'page:meta',
   'page:scroll',
   'appupdate:event', // v0.1.6: {type:'checking'|'available'|'progress'|'downloaded'|'none'|'error', ...}
+  'attachment:changed', // profile attachment status / auto-hide state
+  'shell:visibility', // minimize/attachment hide-show; renderer expires transient UI
 ];
 
 function invoke(channel, payload) {
@@ -77,6 +84,11 @@ const api = {
 
   // renderer → main conveniences
   devicesList: () => invoke('devices:list'),
+  profileGet: () => invoke('profile:get'),
+  profileNew: (name) => invoke('profile:new', { name }),
+  attachmentGet: () => invoke('attachment:get'),
+  attachmentAttachLast: () => invoke('attachment:attachLast'),
+  attachmentDetach: () => invoke('attachment:detach'),
   screenAttach: (webContentsId) => invoke('screen:attach', { webContentsId }),
   // Optional content viewport plus tablet orientation. Omit both for the
   // preset's native portrait viewport.
@@ -115,6 +127,8 @@ const api = {
   onPageMeta: (cb) => on('page:meta', cb),
   onPageScroll: (cb) => on('page:scroll', cb),
   onAppUpdate: (cb) => on('appupdate:event', cb),
+  onAttachmentChanged: (cb) => on('attachment:changed', cb),
+  onShellVisibility: (cb) => on('shell:visibility', cb),
 
   // The <webview preload=...> attribute needs a file: URL to the screen
   // preload — the renderer can't compute absolute paths itself.

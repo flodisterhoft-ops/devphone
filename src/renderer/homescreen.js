@@ -286,7 +286,7 @@
 
     return '<div class="hs hs-ios">' +
              '<button class="hs-done">Done</button>' +
-             '<div class="hs-clock"><div class="hs-time js-clock">' + DP.fmtTime('ios') + '</div>' +
+             '<div class="hs-clock"><div class="hs-time js-clock">' + DP.fmtTime('ios', true) + '</div>' +
              '<div class="hs-date">' + DP.esc(DP.fmtDate()) + '</div></div>' +
              '<div class="hs-grid">' + grid.join('') + '</div>' +
              '<div class="hs-dock-wrap"><div class="hs-dock">' + dock.join('') + '</div></div>' +
@@ -314,9 +314,10 @@
 
     return '<div class="hs hs-android">' +
              '<button class="hs-done">Done</button>' +
-             '<div class="hs-clock"><div class="hs-time js-clock">' + DP.fmtTime('android') + '</div>' +
+             '<div class="hs-clock"><div class="hs-time js-clock">' + DP.fmtTime('android', true) + '</div>' +
              '<div class="hs-date">' + DP.esc(DP.fmtDate()) + '</div></div>' +
-             '<div class="hs-search"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#7a7f88" stroke-width="2.4" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="6"/><path d="M13 13l5 5"/></svg>Search</div>' +
+             '<form class="hs-search" role="search"><svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="#7a7f88" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="6"/><path d="M13 13l5 5"/></svg>' +
+             '<input class="hs-search-input" type="text" inputmode="url" autocomplete="off" spellcheck="false" aria-label="Search or enter website" placeholder="Search or enter website"></form>' +
              '<div class="hs-grid">' + grid.join('') + '</div>' +
              '<div class="hs-dock-wrap"><div class="hs-dock">' + dock.join('') + '</div></div>' +
            '</div>';
@@ -387,6 +388,23 @@
   function wire(root) {
     var hs = root.querySelector('.hs');
     if (!hs) return;
+
+    var search = hs.querySelector('.hs-search');
+    if (search) {
+      search.addEventListener('submit', function (e) {
+        e.preventDefault();
+        if (editing) setEditing(false);
+        var input = search.querySelector('.hs-search-input');
+        if (DP.chrome && DP.chrome.openSearch) DP.chrome.openSearch(input ? input.value : '');
+        else if (DP.chrome) DP.chrome.open('chrome');
+        else DP.toast('⚠️ Browser chrome not loaded');
+      });
+      search.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var input = search.querySelector('.hs-search-input');
+        if (input && e.target !== input) input.focus();
+      });
+    }
 
     hs.addEventListener('click', function (e) {
       var done = e.target.closest('.hs-done');
@@ -473,7 +491,7 @@
   DP.bus.on('minute', function () {
     var d = DP.state.device;
     if (!d) return;
-    var t = DP.fmtTime(d.os);
+    var t = DP.fmtTime(d.os, true);
     document.querySelectorAll('#homescreen .hs-time').forEach(function (n) { n.textContent = t; });
   });
 

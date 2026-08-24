@@ -70,6 +70,8 @@
     addrBar: 'top',        // Chrome address bar position (global)
     inputMode: 'touch',    // 'touch' | 'mouse' (global)
     alwaysOnTop: false,    // window pinning (global)
+    profile: { id: 'default', name: 'DevPhone', isDefault: true },
+    attachment: { supported: false, available: false, attached: false, target: null, last: null },
     contentViewport: null, // {width,height} of the honest content area (unscaled)
     clickThrough: false,   // v0.1.5: cursor is over an INVISIBLE window region
     devicePickerCategory: null // null category prompt | 'phone' | 'tablet'
@@ -166,23 +168,43 @@
     });
   }
 
+  function removeToast(t) {
+    if (!t || !t.parentNode || t.__removing) return;
+    t.__removing = true;
+    t.classList.add('hide');
+    setTimeout(function () { try { t.remove(); } catch (e) {} }, 200);
+  }
+
+  function clearToasts() {
+    if (!el.toasts) return;
+    Array.prototype.slice.call(el.toasts.children).forEach(function (t) { removeToast(t); });
+  }
+
+  function expireToasts() {
+    if (!el.toasts) return;
+    var now = Date.now();
+    Array.prototype.slice.call(el.toasts.children).forEach(function (t) {
+      if (Number(t.getAttribute('data-expires')) <= now) removeToast(t);
+    });
+  }
+
   function toast(msg, ms) {
     var t = document.createElement('div');
     t.className = 'toast';
     t.textContent = msg;
+    var duration = Math.max(250, Number(ms) || 3600);
+    t.setAttribute('data-expires', String(Date.now() + duration));
     el.toasts.appendChild(t);
     while (el.toasts.children.length > 4) el.toasts.removeChild(el.toasts.firstChild);
     requestAnimationFrame(function () { t.classList.add('show'); });
-    setTimeout(function () {
-      t.classList.add('hide');
-      setTimeout(function () { t.remove(); }, 200);
-    }, ms || 3600);
+    setTimeout(expireToasts, duration + 20);
   }
 
-  function fmtTime(os) {
+  function fmtTime(os, withPeriod) {
     var d = new Date();
     var h = d.getHours();
     var m = ('0' + d.getMinutes()).slice(-2);
+    if (withPeriod) return (((h + 11) % 12) + 1) + ':' + m + ' ' + (h < 12 ? 'AM' : 'PM');
     if (os === 'android') return ('0' + h).slice(-2) + ':' + m;
     return (((h + 11) % 12) + 1) + ':' + m;
   }
@@ -360,23 +382,23 @@
     var html;
     if (d.os === 'ios' && formFactorOf(d) === 'tablet') {
       html = '<div class="sb sb-ipad">' +
-               '<span class="sb-time js-clock">' + fmtTime(d.os) + '</span>' +
+               '<span class="sb-time js-clock">' + fmtTime(d.os, true) + '</span>' +
                '<span class="sb-right">' + svgWifi() + svgBattery() + '</span>' +
              '</div>';
     } else if (d.os === 'ios' && d.cutout === 'none') {
       html = '<div class="sb sb-classic">' +
                '<span class="sb-carrier">DevPhone ' + svgWifi() + '</span>' +
-               '<span class="sb-time js-clock">' + fmtTime(d.os) + '</span>' +
+               '<span class="sb-time js-clock">' + fmtTime(d.os, true) + '</span>' +
                '<span class="sb-right">' + svgBattery() + '</span>' +
              '</div>';
     } else if (d.os === 'ios') {
       html = '<div class="sb sb-island">' +
-               '<div class="sb-ear-left"><span class="sb-time js-clock">' + fmtTime(d.os) + '</span></div>' +
+               '<div class="sb-ear-left"><span class="sb-time js-clock">' + fmtTime(d.os, true) + '</span></div>' +
                '<div class="sb-ear-right">' + svgSignal() + svgWifi() + svgBattery() + '</div>' +
              '</div>';
     } else {
       html = '<div class="sb sb-android">' +
-               '<span class="sb-time js-clock">' + fmtTime(d.os) + '</span>' +
+               '<span class="sb-time js-clock">' + fmtTime(d.os, true) + '</span>' +
                '<span class="sb-right">' + svgWifi() + svgSignal() +
                  '<span class="sb-batt-pct">87%</span>' + svgBattery() +
                '</span>' +
@@ -413,8 +435,10 @@
   function startClock() {
     setInterval(function () {
       var os = state.device ? state.device.os : 'ios';
-      var t = fmtTime(os);
-      document.querySelectorAll('.js-clock').forEach(function (n) { n.textContent = t; });
+      document.querySelectorAll('.js-clock').forEach(function (n) {
+        n.textContent = fmtTime(os, true);
+      });
+      expireToasts();
       bus.emit('minute');
     }, 15000);
   }
@@ -615,6 +639,40 @@
     renderSettingsPopover();
   }
 
+  function setAttachmentStatus(status) {
+    if (!status) return;
+    state.attachment = status;
+    renderSettingsPopover();
+  }
+
+  function attachToLastContext() {
+    toggleSettingsPopover(false);
+    invoke('attachment:attachLast').then(function (res) {
+      if (res && res.ok && res.status) {
+        setAttachmentStatus(res.status);
+        toast('📎 Attached to ' + ((res.status.target && res.status.target.label) || 'window'), 2400);
+      } else {
+        toast('⚠️ ' + ((res && res.error) || 'Could not attach to that window'), 3200);
+      }
+    });
+  }
+
+  function detachFromContext() {
+    toggleSettingsPopover(false);
+    invoke('attachment:detach').then(function (res) {
+      if (res && res.status) setAttachmentStatus(res.status);
+      toast('Attachment removed', 1600);
+    });
+  }
+
+  function openAnotherProfile() {
+    toggleSettingsPopover(false);
+    invoke('profile:new', {}).then(function (res) {
+      if (res && res.ok) toast('📱 Opening ' + ((res.profile && res.profile.name) || 'another DevPhone'), 2200);
+      else toast('⚠️ ' + ((res && res.error) || 'Could not open another DevPhone'), 3000);
+    });
+  }
+
   /* ---------- standalone WebKit preview window (v0.1.5) ------------------------
      Opens the current page in a real, headed Playwright-WebKit window —
      native interaction speed (no frame streaming), same device identity
@@ -657,6 +715,23 @@
         '<button data-v="top" class="' + (state.addrBar !== 'bottom' ? 'on' : '') + '">Top</button>' +
         '<button data-v="bottom" class="' + (state.addrBar === 'bottom' ? 'on' : '') + '">Bottom</button>' +
       '</div>';
+    var profileName = (state.profile && state.profile.name) || 'DevPhone';
+    var attachment = state.attachment || {};
+    html += '<div class="set-sec">Profile · ' + esc(profileName) + '</div>' +
+      '<button class="set-row" id="set-newprofile">➕ Open another DevPhone</button>' +
+      '<div class="set-sec">Attachment</div>';
+    if (attachment.attached && attachment.target) {
+      html += '<button class="set-row" id="set-detach">📎 Attached' +
+        '<span class="set-check">✓</span></button>' +
+        '<div class="set-note set-note-wrap">' + esc(attachment.target.label || 'Attached window') + '</div>';
+    } else {
+      html += '<button class="set-row" id="set-attach"' + (attachment.supported === false ? ' disabled' : '') +
+        '>📎 Attach to last active task/window</button>' +
+        '<div class="set-note set-note-wrap">' +
+          esc((attachment.last && attachment.last.label) ||
+            (attachment.supported === false ? 'Windows attachment is unavailable' :
+              'Activate the target first, then return here')) + '</div>';
+    }
     html += '<div class="set-sec">Window</div>' +
       '<button class="set-row" id="set-aot">📌 Always on top' +
         '<span class="set-check">' + (state.alwaysOnTop ? '✓' : '✗') + '</span>' +
@@ -823,7 +898,61 @@
     applyStatusTheme();
     updateHomeIndicator();
     layoutContent();
+    scheduleResumeSave();
     if (!silent) bus.emit('went-home');
+  }
+
+  /* ---------- per-profile session resume ------------------------------------
+     Attachment switches hide (not close) the live window, so DOM/form state is
+     exact while DevPhone keeps running. This snapshot handles full app restarts:
+     it restores the last browser/PWA, URL and engine on that profile.          */
+
+  var resumeTimer = null;
+  var resumeScrollY = 0;
+  var pendingResumeScroll = 0;
+  var resumeApplied = false;
+
+  function scheduleResumeSave() {
+    clearTimeout(resumeTimer);
+    resumeTimer = setTimeout(function () {
+      try {
+        var appState = null;
+        if (state.app && state.app.type === 'browser') {
+          appState = { type: 'browser', browser: state.app.browser || 'chrome' };
+        } else if (state.app && state.app.type === 'pwa' && state.app.app) {
+          appState = { type: 'pwa', app: state.app.app };
+        }
+        localStorage.setItem('devphone.resume', JSON.stringify({
+          app: appState,
+          url: state.url || '',
+          engine: state.engine,
+          scrollY: Math.max(0, Math.round(resumeScrollY || 0)),
+          savedAt: Date.now()
+        }));
+      } catch (e) {}
+    }, 180);
+  }
+
+  function loadResume() {
+    try { return JSON.parse(localStorage.getItem('devphone.resume') || 'null'); }
+    catch (e) { return null; }
+  }
+
+  function applyResume() {
+    if (resumeApplied || !state.attached || !DP.chrome) return;
+    resumeApplied = true;
+    var saved = loadResume();
+    if (!saved || !saved.app) return;
+    resumeScrollY = Math.max(0, Number(saved.scrollY) || 0);
+    pendingResumeScroll = resumeScrollY;
+    if (saved.app.type === 'pwa' && saved.app.app) {
+      DP.chrome.launchApp(saved.app.app);
+    } else {
+      DP.chrome.open(saved.app.browser || 'chrome', { url: saved.url || undefined });
+    }
+    if (saved.engine === 'webkit') {
+      setTimeout(function () { setEngine('webkit'); }, 1200);
+    }
   }
 
   function wireGesture() {
@@ -883,6 +1012,14 @@
     wv.addEventListener('did-stop-loading', function () {
       bus.emit('loading', false);
       updateNavState();
+      if (pendingResumeScroll > 0) {
+        var restoreY = pendingResumeScroll;
+        pendingResumeScroll = 0;
+        setTimeout(function () {
+          try { wv.executeJavaScript('window.scrollTo(0,' + Math.round(restoreY) + ')').catch(function () {}); }
+          catch (e) {}
+        }, 180);
+      }
     });
     wv.addEventListener('did-fail-load', function (e) {
       if (e.errorCode !== -3 && e.isMainFrame) {
@@ -1535,6 +1672,7 @@
     state.url = url || '';
     if (!inPage) { state.themeColor = null; applyStatusTheme(); }
     updateNavState();
+    scheduleResumeSave();
     bus.emit('navigated', { url: state.url, inPage: !!inPage });
   }
 
@@ -1550,6 +1688,7 @@
 
   function navigate(url) {
     state.url = url;
+    scheduleResumeSave();
     bus.emit('willnavigate', { url: url });
     if (state.engine === 'webkit') { invoke('nav', { action: 'go', url: url }); return; }
     var wv = el.page;
@@ -1708,6 +1847,7 @@
         state.engine = 'webkit';
         document.body.classList.add('engine-webkit');
         updateEngineBtn();
+        scheduleResumeSave();
         toast('🧭 WebKit active', 2200);
       });
     }
@@ -1716,6 +1856,7 @@
       document.body.classList.remove('engine-webkit');
       updateEngineBtn();
       updateNavState();
+      scheduleResumeSave();
       toast('⚡ Chromium active', 2200);
     });
   }
@@ -1972,6 +2113,9 @@
 
     if (el.settingsPopover) el.settingsPopover.addEventListener('click', function (e) {
       if (e.target.closest('#set-aot')) { setAlwaysOnTop(!state.alwaysOnTop); return; }
+      if (e.target.closest('#set-newprofile')) { openAnotherProfile(); return; }
+      if (e.target.closest('#set-attach')) { attachToLastContext(); return; }
+      if (e.target.closest('#set-detach')) { detachFromContext(); return; }
       if (e.target.closest('#set-wkwin')) { openWebkitWindow(); return; }
       if (e.target.closest('#set-update')) { toggleSettingsPopover(false); if (window.dpUpdate) dpUpdate.check(); return; }
       var btn = e.target.closest('.set-seg button');
@@ -2199,6 +2343,15 @@
   /* ---------- main → renderer events ----------------------------------------- */
 
   function wireEngineEvents() {
+    listen('attachment:changed', function (status) {
+      setAttachmentStatus(status);
+    });
+
+    listen('shell:visibility', function (payload) {
+      if (!payload || payload.visible === false) clearToasts();
+      else expireToasts();
+    });
+
     listen('picker:result', function () {
       state.pickerOn = false;
       if (el.btnPicker) el.btnPicker.classList.remove('active');
@@ -2427,6 +2580,20 @@
     wireCtxMenu();
     renderNavbar();
     startClock();
+    bus.on('attached', applyResume);
+    bus.on('session-changed', scheduleResumeSave);
+    bus.on('scroll', function (y) {
+      if (typeof y === 'number') {
+        resumeScrollY = Math.max(0, y);
+        scheduleResumeSave();
+      }
+    });
+    window.addEventListener('blur', clearToasts);
+    window.addEventListener('focus', expireToasts);
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) clearToasts();
+      else expireToasts();
+    });
 
     // global settings (loaded before the first applyDevice)
     try { state.addrBar = localStorage.getItem('devphone.addrbar') === 'bottom' ? 'bottom' : 'top'; } catch (e) {}
@@ -2436,6 +2603,16 @@
     // always-on-top: persisted globally, re-applied at boot
     try { state.alwaysOnTop = localStorage.getItem('devphone.alwaysontop') === '1'; } catch (e) {}
     if (state.alwaysOnTop) invoke('shell:alwaysOnTop', { on: true });
+
+    invoke('profile:get').then(function (res) {
+      if (res && res.profile) {
+        state.profile = res.profile;
+        renderSettingsPopover();
+      }
+    });
+    invoke('attachment:get').then(function (res) {
+      if (res && res.status) setAttachmentStatus(res.status);
+    });
 
     invoke('devices:list').then(function (res) {
       var devices = res && res.devices;

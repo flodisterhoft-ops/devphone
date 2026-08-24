@@ -107,8 +107,14 @@
     if (!q) return null;
     if (/^https?:\/\//i.test(q)) return q;
     if (/^about:/i.test(q)) return q;
-    if (q.indexOf('.') < 0 || /\s/.test(q)) return null;   // not a URL → no-op
+    if (/^(localhost|127(?:\.\d+){3}|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(q)) return 'http://' + q;
+    if (q.indexOf('.') < 0 || /\s/.test(q)) return null;
     return 'https://' + q;
+  }
+  function searchOrUrl(q) {
+    q = String(q || '').trim();
+    if (!q) return null;
+    return smartUrl(q) || ('https://www.google.com/search?q=' + encodeURIComponent(q));
   }
   function hostOf(url) {
     try { return new URL(url).hostname.replace(/^www\./, ''); } catch (e) { return url || ''; }
@@ -384,7 +390,7 @@
     }
     input.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') {
-        var url = smartUrl(input.value);
+        var url = searchOrUrl(input.value);
         if (!url) { input.classList.add('shake'); setTimeout(function () { input.classList.remove('shake'); }, 350); return; }
         teardown();
         go(url);
@@ -515,8 +521,8 @@
     var input = form.querySelector('input');
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      var url = smartUrl(input.value);
-      if (!url) {  // "no dots" → about:blank no-op, just nudge the field
+      var url = searchOrUrl(input.value);
+      if (!url) {
         input.classList.add('shake');
         setTimeout(function () { input.classList.remove('shake'); }, 350);
         return;
@@ -714,6 +720,12 @@
     DP.applyStatusTheme();
     DP.updateHomeIndicator();
     relayout();
+    DP.bus.emit('session-changed');
+  }
+
+  function openSearch(query) {
+    var url = searchOrUrl(query);
+    open('chrome', url ? { url: url } : {});
   }
 
   function launchApp(app) {
@@ -739,6 +751,7 @@
     DP.updateHomeIndicator();
     relayout();   // Android: black status strip; iOS: edge-to-edge
     DP.toast('▶️ ' + app.name, 2000);
+    DP.bus.emit('session-changed');
   }
 
   function close() {
@@ -748,10 +761,13 @@
     closeSheet();
     var root = chromeRoot();
     if (root) { root.hidden = true; root.innerHTML = ''; }
+    DP.bus.emit('session-changed');
   }
 
   DP.chrome = {
     open: open,
+    openSearch: openSearch,
+    resolveQuery: searchOrUrl,
     close: close,
     launchApp: launchApp,
     getInsets: getInsets,

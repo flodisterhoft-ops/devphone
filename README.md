@@ -72,6 +72,16 @@ home screen, and PWA flow all behave like the real thing.
   saved to `Pictures/DevPhone` + clipboard.
 - **Touch & pinch** — the mouse acts as a finger; real touchscreen input passes
   through on touch laptops.
+- **Task/window attachment** — attach a phone to the last active Windows task,
+  tab, or window. It disappears when you switch contexts and returns in the
+  same place without stealing focus. Apps that expose their selected task via
+  Windows Accessibility get task-level matching; other apps fall back to their
+  window title or window identity.
+- **Multiple isolated phones** — open another DevPhone from Settings. Every
+  phone runs as its own profile with separate browser cookies, installed PWAs,
+  WebKit storage, device settings, active page, and saved desktop position.
+- **Working Android home search** — paste a local or public URL, or type a
+  search, and press Enter to open it directly in Chrome.
 - **🔄 One-click updates** — installed GitHub builds check automatically, show
   the release changelog, then download, install, restart, and reopen after one
   press of **Update now**. Check manually any time in **Settings → About**.
@@ -108,6 +118,26 @@ between portrait and landscape.
   <br>
   <sub>Tablet presets stay separate from phones and work in portrait and landscape.</sub>
 </div>
+
+## Multiple phones and task attachment
+
+Open **Settings → Open another DevPhone** to start an independent phone. The
+default phone and every additional profile can use a different site, device,
+engine, login, and desktop position at the same time.
+
+To bind one to your work:
+
+1. Activate the Codex/Claude task, terminal tab, browser tab, or application
+   window that owns the preview.
+2. Return to DevPhone and choose **Settings → Attach to last active task/window**.
+3. Switch contexts normally. DevPhone hides outside the attached context and
+   returns when that context is active again. Use **Attached** in Settings to
+   detach it.
+
+DevPhone reads Windows' foreground-window and accessibility metadata only; it
+does not inject input into the attached application. Internal task matching
+depends on what the host app exposes to Windows. When no stable task/tab is
+available, attachment remains window-level.
 
 ## Run from source
 

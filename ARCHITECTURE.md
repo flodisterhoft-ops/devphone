@@ -848,3 +848,50 @@ identity.
   zoom remains shared under `devphone.scale`.
 - Every device switch reloads the destination device's saved/default scale;
   changing one tablet therefore cannot resize another tablet unexpectedly.
+
+## v0.2.0 extensions (profiles, task attachment, session resume)
+
+### Independent process profiles
+
+`src/main/profile.js` parses `--profile=<id>` before app ready and redirects
+named profiles to `<default userData>/profiles/<id>`. Electron's Chromium data,
+`persist:devphone` partition, single-instance lock, renderer localStorage, and
+`webkit-storage.json` are therefore isolated without turning the singleton IPC
+and WebKit modules into risky multi-window global state. The default invocation
+keeps its original userData directory for backward compatibility.
+
+`profile:new` launches the same executable with a generated ID/name. Development
+runs prepend the source root to the Electron arguments; packaged runs invoke the
+installed executable directly. Secondary profiles do not perform the automatic
+update check because all profiles share one installed binary.
+
+### Windows task/window attachment
+
+`src/main/attachment.js` starts one hidden, non-interactive PowerShell watcher.
+It reads `GetForegroundWindow`, the owning process/title, and selected
+UI Automation TabItem/ListItem/TreeItem/DataItem values. Matching priority is:
+selected accessibility items → exact window title → exact HWND. Two consecutive
+mismatches are required before hiding to avoid focus-transition flicker.
+
+The DevPhone HWND itself is exempt, so clicking the attached phone does not make
+it disappear. A matching target uses `showInactive()` plus temporary always-on-
+top; a mismatch uses `hide()`, keeping the live renderer/DOM intact. Explicit
+Minimize is tracked separately and is never undone automatically. Persisted
+attachments are not allowed to auto-hide a fresh launch until their target has
+first been observed in that run, preventing a stale attachment from making the
+phone inaccessible.
+
+Window position is debounced to `userData/window-position.json`. Attachment
+metadata is stored in `userData/attachment.json`; no host-app content or input is
+captured.
+
+### Renderer persistence and small consistency fixes
+
+`devphone.resume` stores the profile's active browser/PWA, URL, engine, and last
+reported scroll position. Normal task switching remains exact because the
+window is only hidden; this snapshot is the restart fallback. Status-bar and
+home-screen clocks use 12-hour time with AM/PM. Toasts carry wall-clock expiry
+timestamps and are cleared on minimize, hide, or window blur so background
+throttling cannot resurrect stale feedback.
+The Android home search is now a real form that opens URLs, localhost, or Google
+queries in Chrome.

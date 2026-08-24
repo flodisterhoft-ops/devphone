@@ -14,6 +14,8 @@ const { app, BrowserWindow, Menu, shell, session } = require('electron');
 const { fileURLToPath } = require('url');
 
 const ROOT = path.join(__dirname, '..', '..');
+const argv = process.argv.slice(1);
+const SELFTEST = argv.includes('--selftest');
 
 // Match real-phone media behavior: pages may autoplay only MUTED video;
 // audible playback needs a user gesture. Electron's default
@@ -26,7 +28,15 @@ if (process.env.DEVPHONE_USERDATA) {
   try { app.setPath('userData', process.env.DEVPHONE_USERDATA); } catch (e) {
     console.error('[main] DEVPHONE_USERDATA setPath failed:', e && e.message);
   }
+} else if (SELFTEST) {
+  // Selftests must never contend with, or write into, a normal DevPhone
+  // profile. This must happen before profile configuration and app ready.
+  try {
+    app.setPath('userData', path.join(require('os').tmpdir(), 'devphone-selftest-' + process.pid));
+  } catch (_) {}
 }
+
+const profileManager = require('./profile').configure({ app, argv, root: ROOT });
 
 process.env.PLAYWRIGHT_BROWSERS_PATH = app.isPackaged
   ? path.join(process.resourcesPath, 'pw-browsers')
@@ -46,11 +56,10 @@ const APP_ICON = path.join(ROOT, 'src', 'assets', 'icon.png');
 
 const ipc = require('./ipc');
 const webkit = require('./webkit');
+const attachmentManager = require('./attachment').create({ app, selftest: SELFTEST });
 
 // ---------- argv ----------
 
-const argv = process.argv.slice(1);
-const SELFTEST = argv.includes('--selftest');
 let selftestUrl = 'https://example.com';
 function argValue(flag) {
   const eq = argv.find((a) => a.startsWith(flag + '='));
@@ -200,9 +209,11 @@ function rendererFile() {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  const savedPosition = attachmentManager.getSavedPosition();
+  const windowOptions = {
     width: 620,
     height: 1060,
+    title: profileManager.info.name,
     frame: false,
     transparent: true,
     resizable: false,
@@ -217,9 +228,18 @@ function createWindow() {
       webviewTag: true,
       backgroundThrottling: false,
     },
-  });
+  };
+  if (savedPosition) {
+    windowOptions.x = savedPosition.x;
+    windowOptions.y = savedPosition.y;
+  }
+  const win = new BrowserWindow(windowOptions);
 
   win.setMenuBarVisibility(false);
+  win.on('page-title-updated', (event) => {
+    event.preventDefault();
+    try { win.setTitle(profileManager.info.name); } catch (e) {}
+  });
   win.on('show', () => settleTaskbarAttention(win));
   win.on('focus', () => settleTaskbarAttention(win));
   settleTaskbarAttention(win);
@@ -408,22 +428,18 @@ async function runSelftest(win) {
 
 // ---------- lifecycle ----------
 
-// Selftest runs use an isolated profile: a normal instance (or a zombie from
-// a crashed run) holding the default userData lock would make us die silently.
-// An explicit DEVPHONE_USERDATA (set above) takes precedence over the tmp dir.
-if (SELFTEST && !process.env.DEVPHONE_USERDATA) {
-  try {
-    app.setPath('userData', path.join(require('os').tmpdir(), 'devphone-selftest-' + process.pid));
-  } catch (_) {}
-}
-
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null); // no menu bar, ever
   configureSessionSecurity();
 
-  ipc.init({ selftest: SELFTEST }); // handlers must exist before renderer runs
+  ipc.init({
+    selftest: SELFTEST,
+    profileManager,
+    attachmentManager,
+  }); // handlers must exist before renderer runs
   const win = createWindow();
   ipc.setWindow(win);
+  attachmentManager.setWindow(win, ipc.send);
 
   if (SELFTEST) runSelftest(win);
 
@@ -437,7 +453,11 @@ app.whenReady().then(() => {
       const cloudupdate = require('./cloudupdate');
       cloudupdate.init({ send: ipc.send });
       // Let the renderer subscribe to appupdate:event before the first check.
-      setTimeout(() => { try { cloudupdate.check(); } catch (e) {} }, 3000);
+      // Only the default profile checks automatically; secondary phones share
+      // the same installed executable and must not all offer the same update.
+      if (profileManager.info.isDefault) {
+        setTimeout(() => { try { cloudupdate.check(); } catch (e) {} }, 3000);
+      }
     } catch (e) {}
   }
 
@@ -445,6 +465,7 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const w = createWindow();
       ipc.setWindow(w);
+      attachmentManager.setWindow(w, ipc.send);
     }
   });
 });
@@ -457,6 +478,7 @@ let shuttingDown = false;
 app.on('before-quit', (event) => {
   if (shuttingDown) return;
   shuttingDown = true;
+  attachmentManager.shutdown();
   // Give Playwright WebKit a moment to die cleanly, then continue quitting.
   event.preventDefault();
   Promise.race([webkit.shutdown(), delay(2000)])
