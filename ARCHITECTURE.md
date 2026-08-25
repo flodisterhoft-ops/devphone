@@ -871,7 +871,10 @@ update check because all profiles share one installed binary.
 It reads `GetForegroundWindow`, the owning process/title, and selected
 UI Automation TabItem/ListItem/TreeItem/DataItem values. Matching priority is:
 selected accessibility items → exact window title → exact HWND. Two consecutive
-mismatches are required before hiding to avoid focus-transition flicker.
+mismatches are required before hiding to avoid focus-transition flicker. The
+watcher emits a heartbeat for unchanged foreground contexts as well as changes;
+without that repeat, a stable different task could remain at one mismatch and
+the phone would never hide.
 
 The DevPhone HWND itself is exempt, so clicking the attached phone does not make
 it disappear. A matching target uses `showInactive()` plus temporary always-on-
@@ -879,7 +882,10 @@ top; a mismatch uses `hide()`, keeping the live renderer/DOM intact. Explicit
 Minimize is tracked separately and is never undone automatically. Persisted
 attachments are not allowed to auto-hide a fresh launch until their target has
 first been observed in that run, preventing a stale attachment from making the
-phone inaccessible.
+phone inaccessible. If a persisted task selection temporarily disappears from
+the host's accessibility tree, observing the same host process/window still
+arms external-app hiding; this keeps Claude → Codex switching reliable without
+pretending an unknown in-host task is an exact match.
 
 Window position is debounced to `userData/window-position.json`. Attachment
 metadata is stored in `userData/attachment.json`; no host-app content or input is

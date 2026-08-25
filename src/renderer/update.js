@@ -352,10 +352,9 @@
   /* ---------- demo (Ctrl+Shift+U) ---------- */
 
   var DEMO_NOTES =
-    'Attach a DevPhone to a Windows task or window\n' +
-    'Run multiple isolated DevPhone profiles at once\n' +
-    'Home search, AM/PM clock, and transient-toast fixes';
-  var DEMO_VERSION = (window.devphone && devphone.version) || '0.2.0';
+    'Attached phones hide reliably after switching tasks or apps\n' +
+    'Stable foreground heartbeats complete the anti-flicker check';
+  var DEMO_VERSION = (window.devphone && devphone.version) || '0.2.1';
 
   function runDemo() {
     cur.demo = true;

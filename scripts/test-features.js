@@ -75,6 +75,19 @@ async function main() {
   assert(fakeWindow.visible && !attachmentLogic.getStatus().autoHidden, 'attached phone did not return with target context');
   attachmentLogic.shutdown();
 
+  const persistedDir = path.join(profileDir, 'persisted-attachment');
+  fs.mkdirSync(persistedDir, { recursive: true });
+  fs.writeFileSync(path.join(persistedDir, 'attachment.json'), JSON.stringify(target));
+  const persistedWindow = new FakeWindow();
+  const persistedLogic = attachment.create({ app: { getPath: () => persistedDir }, selftest: true });
+  persistedLogic.setWindow(persistedWindow, () => {});
+  persistedLogic._testApplyContext(Object.assign({}, contextA, { selected: [] }));
+  persistedLogic._testApplyContext(otherContext);
+  persistedLogic._testApplyContext(otherContext);
+  assert(!persistedWindow.visible && persistedLogic.getStatus().autoHidden,
+    'persisted attachment did not hide outside its host when task metadata was unavailable');
+  persistedLogic.shutdown();
+
   const electronApp = await _electron.launch({
     args: [ROOT],
     env: Object.assign({}, process.env, { DEVPHONE_USERDATA: profileDir }),
@@ -94,6 +107,11 @@ async function main() {
     }, 10000, 'Windows attachment helper');
     const attachmentStatus = await win.evaluate(() => window.devphone.attachmentGet());
     assert(attachmentStatus.status.supported, 'Windows attachment support was not reported');
+    const firstSample = Number(attachmentStatus.status.sampleSequence) || 0;
+    await waitUntil(async () => {
+      const result = await win.evaluate(() => window.devphone.attachmentGet());
+      return Number(result && result.status && result.status.sampleSequence) >= firstSample + 2;
+    }, 3000, 'Windows attachment heartbeat for a stable foreground context');
 
     const statusTime = await win.locator('#statusbar .js-clock').first().textContent();
     assert(/\b(?:AM|PM)$/.test(statusTime || ''), 'status-bar clock must include AM/PM: ' + statusTime);
@@ -147,7 +165,9 @@ async function main() {
 
     console.log('PASS attachment task matching');
     console.log('PASS attachment hide/return lifecycle');
+    console.log('PASS persisted attachment hides after leaving a recognized host');
     console.log('PASS Windows foreground/accessibility helper');
+    console.log('PASS Windows attachment heartbeat repeats stable contexts');
     console.log('PASS AM/PM status clock');
     console.log('PASS toast clears while minimized');
     console.log('PASS Android home search opens Chrome');

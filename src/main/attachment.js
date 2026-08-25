@@ -60,7 +60,6 @@ function Read-SelectedItems([IntPtr]$handle) {
   return @($items.ToArray())
 }
 
-$last = ''
 while ($true) {
   try {
     $hwnd = [DevPhoneWindows]::GetForegroundWindow()
@@ -83,11 +82,12 @@ while ($true) {
         selected = $selected
       }
       $json = $context | ConvertTo-Json -Depth 4 -Compress
-      if ($json -ne $last) {
-        [Console]::Out.WriteLine($json)
-        [Console]::Out.Flush()
-        $last = $json
-      }
+      # Emit every observation, including an unchanged foreground context.
+      # The Node side deliberately requires two consecutive mismatches before
+      # hiding; suppressing duplicates left a stable different task stuck at
+      # one mismatch forever.
+      [Console]::Out.WriteLine($json)
+      [Console]::Out.Flush()
     }
   } catch {}
   Start-Sleep -Milliseconds 450
@@ -131,6 +131,13 @@ function processKey(context) {
   return normalizeText((context && context.exe) || (context && context.processName));
 }
 
+function matchesHost(target, context) {
+  if (!target || !context) return false;
+  const sameWindow = Number(target.hwnd) > 0 && Number(target.hwnd) === Number(context.hwnd);
+  const sameProcess = processKey(target) && processKey(target) === processKey(context);
+  return !!(sameWindow || sameProcess);
+}
+
 function targetFromContext(context) {
   const selected = normalizeSelected(context && context.selected);
   const selectedKey = selectionKey({ selected });
@@ -153,8 +160,7 @@ function targetFromContext(context) {
 function matchesTarget(target, context) {
   if (!target || !context) return false;
   const sameWindow = Number(target.hwnd) > 0 && Number(target.hwnd) === Number(context.hwnd);
-  const sameProcess = processKey(target) && processKey(target) === processKey(context);
-  if (!sameWindow && !sameProcess) return false;
+  if (!matchesHost(target, context)) return false;
   if (target.keyType === 'selection') return selectionKey(context) === target.key;
   if (target.keyType === 'title') return normalizeText(context.title) === target.key;
   return sameWindow;
@@ -188,6 +194,8 @@ function create(options) {
   let manualMinimized = false;
   let mismatchCount = 0;
   let targetSeenThisRun = false;
+  let hostSeenThisRun = false;
+  let sampleSequence = 0;
   let buffer = '';
   let positionTimer = null;
 
@@ -206,6 +214,7 @@ function create(options) {
       } : null,
       last: lastExternal ? { label: labelFor(targetFromContext(lastExternal)) } : null,
       autoHidden,
+      sampleSequence,
     };
   }
 
@@ -258,6 +267,9 @@ function create(options) {
     if (!own && context && context.hwnd) lastExternal = context;
     if (!target || own || manualMinimized) return;
 
+    const sameHost = matchesHost(target, context);
+    if (sameHost) hostSeenThisRun = true;
+
     if (matchesTarget(target, context)) {
       targetSeenThisRun = true;
       mismatchCount = 0;
@@ -271,7 +283,13 @@ function create(options) {
       showAttached();
     } else {
       mismatchCount++;
-      if (targetSeenThisRun && mismatchCount >= 2) hideAttached();
+      // A persisted selection target can temporarily disappear from Claude's
+      // accessibility tree after navigation or restart. Merely seeing the same
+      // host is enough to arm hiding when the user later leaves that host; an
+      // in-host task mismatch still requires the exact target to have been seen
+      // (or explicitly attached) during this run.
+      const canHide = targetSeenThisRun || (!sameHost && hostSeenThisRun);
+      if (canHide && mismatchCount >= 2) hideAttached();
     }
   }
 
@@ -281,6 +299,7 @@ function create(options) {
     try {
       const parsed = JSON.parse(line);
       parsed.selected = normalizeSelected(parsed.selected);
+      sampleSequence++;
       helperReady = true;
       helperError = '';
       applyContext(parsed);
@@ -351,6 +370,7 @@ function create(options) {
     if (!lastExternal) return { ok: false, error: 'Activate the target window or task first, then return to DevPhone.' };
     target = targetFromContext(lastExternal);
     targetSeenThisRun = true;
+    hostSeenThisRun = true;
     try { target.alwaysOnTopBefore = !!(win && !win.isDestroyed() && win.isAlwaysOnTop()); } catch (e) {}
     mismatchCount = 0;
     saveTarget();
@@ -363,6 +383,7 @@ function create(options) {
     const restoreAlwaysOnTop = !!(target && target.alwaysOnTopBefore);
     target = null;
     targetSeenThisRun = false;
+    hostSeenThisRun = false;
     mismatchCount = 0;
     autoHidden = false;
     saveTarget();
