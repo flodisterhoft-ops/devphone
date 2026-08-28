@@ -10,5 +10,8 @@ galaxy-test.log
 selftest.json
 build-info.json
 
+# Local Claude task history (private; backed up separately, never commit)
+.claude-sessions/
+
 # debug logs (never commit — may contain local paths)
 *.log
